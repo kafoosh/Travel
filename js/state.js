@@ -80,6 +80,12 @@ export function persistLocal(){
   } catch(e){ console.warn('Could not save trip', e); }
 }
 
+/* Drop the offline cache for a room — used when its shared copy is deleted,
+   so the code can't be resurrected from this browser. */
+export function forgetRoomCache(code){
+  try{ localStorage.removeItem(ROOM_PREFIX + code); } catch(e){}
+}
+
 let cloudPushHook = null;
 export function setCloudPushHook(fn){ cloudPushHook = fn; }
 

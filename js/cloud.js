@@ -31,10 +31,12 @@ function setStatus(status, error){
   if(onStatus) onStatus();
 }
 
-function errorMessage(e){
+function errorMessage(e, what){
   const code = (e && e.code) || '';
   if(code === 'auth/operation-not-allowed')
     return 'Anonymous sign-in is switched off for this Firebase project — turn it on under Authentication → Sign-in method.';
+  if(code === 'permission-denied' && what === 'delete')
+    return 'Firestore refused the delete. The published rules probably still say “allow delete: if false” — see the README for the rule that permits it.';
   if(code === 'permission-denied')
     return 'Firestore refused the request. Check the security rules have been published.';
   if(code === 'unavailable' || code === 'auth/network-request-failed')
@@ -69,6 +71,7 @@ async function loadFirebase(){
     serverTimestamp: fsMod.serverTimestamp,
     signIn: () => auth.currentUser ? Promise.resolve(auth.currentUser) : authMod.signInAnonymously(auth),
     write: (code, payload) => fsMod.setDoc(fsMod.doc(db, 'trips', code), payload),
+    remove: (code) => fsMod.deleteDoc(fsMod.doc(db, 'trips', code)),
     subscribe: (code, onData, onError) =>
       fsMod.onSnapshot(fsMod.doc(db, 'trips', code), snap => onData({
         exists: snap.exists(),
@@ -127,20 +130,63 @@ export async function joinRoom(code){
   }
 }
 
-export async function createRoom(){
-  if(!FIREBASE_CONFIG){
-    setStatus('error', 'Sharing isn’t configured on this deployment — see the README for the two-minute Firebase setup.');
-    return;
-  }
+/* Stop listening and cancel any queued write, so nothing further lands in
+   the room we're about to leave behind. */
+function detach(){
+  if(unsub){ unsub(); unsub = null; }
+  clearTimeout(pushTimer);
+}
+
+function notConfigured(){
+  setStatus('error', 'Sharing isn’t configured on this deployment — see the README for the two-minute Firebase setup.');
+  return false;
+}
+
+async function openNewRoom(){
   const code = newRoomCode();
   history.replaceState(null, '', shareUrl(code));
   await joinRoom(code);
   await pushNow();
+  return cloud.status !== 'error';
+}
+
+export async function createRoom(){
+  if(!FIREBASE_CONFIG) return notConfigured();
+  return openNewRoom();
+}
+
+/* Copy the trip into a brand-new room and move this browser to it. The
+   original room keeps whatever it holds now: we detach first, so neither
+   `beforeCopy` nor any later edit can reach it. */
+export async function duplicateRoom(beforeCopy){
+  if(!FIREBASE_CONFIG) return notConfigured();
+  detach();
+  if(beforeCopy) beforeCopy();
+  return openNewRoom();
+}
+
+/* Delete the shared copy outright. Returns { code } so the caller can drop
+   the room's local cache, or { error } if Firestore refused — the error is
+   returned rather than left in cloud.status, which the re-subscribe below
+   would immediately overwrite with 'synced'. */
+export async function deleteRoom(){
+  const code = cloud.room;
+  if(!code || !api) return { error: 'This trip isn’t in a shared room.' };
+  detach();
+  try{
+    await api.remove(code);
+  } catch(e){
+    await joinRoom(code);            // still ours — go back to watching it
+    return { error: errorMessage(e, 'delete') };
+  }
+  cloud.room = null; cloud.note = null;
+  history.replaceState(null, '', location.origin + location.pathname);
+  setStatus('local');
+  return { code };
 }
 
 export function leaveRoom(){
-  if(unsub){ unsub(); unsub = null; }
-  clearTimeout(pushTimer);
+  detach();
   cloud.room = null; cloud.note = null;
   history.replaceState(null, '', location.origin + location.pathname);
   setStatus('local');
