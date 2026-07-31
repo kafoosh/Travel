@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="parchment">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Travel Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
+<link rel="stylesheet" href="css/main.css" />
+<script src="vendor/leaflet/leaflet.js"></script>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Travel Planner</div>
+  <h1 class="title" id="trip-title" title="Click to edit trip settings"></h1>
+  <p class="hero-sub" id="trip-subtitle"></p>
+  <div class="hero-hotels" id="hero-hotels"></div>
+  <div class="toplinks">
+    <button id="btn-view-days" class="active">Day by Day</button>
+    <button id="btn-view-optional">Optional</button>
+    <button id="btn-view-bin">Bin</button>
+    <button id="btn-view-info">Trip Info</button>
+    <button id="btn-settings" title="Trip settings">⚙ Settings</button>
+    <button id="undo-btn" title="Undo last change" disabled>↺ Undo</button>
+    <button id="cloud-chip" class="hidden" title="Sync status — opens Trip Info">● Shared</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section id="view-days">
+    <div class="daytabs" id="daytabs"></div>
+    <div class="daypanel" id="daypanel"></div>
+  </section>
+
+  <section id="view-optional" class="hidden">
+    <div class="daypanel viewpanel">
+      <div class="daypanel-head">
+        <h2>Optional</h2>
+        <span class="head-hint">Ideas not on any day yet — add them where they fit</span>
+      </div>
+      <div id="optional-list" class="bin-list"></div>
+    </div>
+  </section>
+
+  <section id="view-bin" class="hidden">
+    <div class="daypanel viewpanel">
+      <div class="daypanel-head"><h2>Bin</h2></div>
+      <div id="bin-list" class="bin-list"></div>
+    </div>
+  </section>
+
+  <section id="view-info" class="hidden">
+    <div class="daypanel viewpanel">
+      <div class="daypanel-head"><h2>Trip Info</h2></div>
+      <div class="infogrid" id="infogrid"></div>
+    </div>
+  </section>
+
+  <footer id="page-footer"></footer>
+</div>
+
+<!-- Location detail modal -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-box" id="modal-box">
+    <button class="modal-close" id="modal-close" aria-label="Close">✕</button>
+    <div class="modal-photo" id="modal-photo"></div>
+    <div class="modal-content">
+      <div class="modal-time-row" id="modal-time-row"></div>
+      <h3 class="modal-title" id="modal-title"></h3>
+      <div class="modal-tags" id="modal-tags"></div>
+      <p class="modal-text" id="modal-text"></p>
+      <label class="modal-notes-label" for="modal-notes">Notes</label>
+      <textarea id="modal-notes" class="modal-notes" rows="3" placeholder="Quick notes for this stop — booking refs, must-try dishes, who wanted to come here…"></textarea>
+      <div class="modal-actions">
+        <button class="reset-btn" id="modal-edit">✎ Edit location</button>
+        <button class="reset-btn" id="modal-bin">🗑 Move to bin</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / edit location modal -->
+<div class="modal-overlay" id="add-location-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="add-location-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title" id="al-heading">Add a location</h3>
+      <form id="add-location-form" class="add-location-form">
+        <input type="hidden" id="al-editing" value="">
+        <label>Name<input type="text" id="al-name" required></label>
+        <label>Day<select id="al-day"></select></label>
+        <label>Category<select id="al-cat"></select></label>
+        <label>Duration (minutes)<input type="number" id="al-dur" value="60" min="5" step="5" required></label>
+        <div class="al-coords">
+          <label>Latitude<input type="text" id="al-lat" placeholder="e.g. 41.8986"></label>
+          <label>Longitude<input type="text" id="al-lng" placeholder="e.g. 12.4769"></label>
+        </div>
+        <p class="al-hint">Tip: right-click a spot on any online map and copy the coordinates. Without them the stop still works, but won't appear on the map or in travel times.</p>
+        <label>Short description<textarea id="al-desc" rows="2"></textarea></label>
+        <label>Longer history/trivia (shown in the popup)<textarea id="al-detail" rows="3"></textarea></label>
+        <label>Notes<textarea id="al-notes" rows="2"></textarea></label>
+        <label>Photo URL<input type="text" id="al-img" placeholder="https://…"></label>
+        <label>Tags (comma-separated)<input type="text" id="al-tags" placeholder="e.g. rainy-day, with kids"></label>
+        <button type="submit" class="reset-btn" id="al-submit">Add location</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Day edit modal -->
+<div class="modal-overlay" id="day-edit-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="day-edit-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title">Edit day</h3>
+      <form id="day-edit-form" class="add-location-form">
+        <input type="hidden" id="de-index" value="">
+        <label>Title<input type="text" id="de-title" required></label>
+        <label>Start time<input type="time" id="de-start" required></label>
+        <label>Hotel (start & end of the day)<select id="de-hotel"></select></label>
+        <button type="submit" class="reset-btn">Save day</button>
+        <button type="button" class="reset-btn danger" id="de-delete">Delete this day (stops go to the bin)</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Hotel edit modal -->
+<div class="modal-overlay" id="hotel-edit-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="hotel-edit-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title" id="he-heading">Add a hotel</h3>
+      <form id="hotel-edit-form" class="add-location-form">
+        <input type="hidden" id="he-editing" value="">
+        <label>Name<input type="text" id="he-name" required></label>
+        <div class="al-coords">
+          <label>Latitude<input type="text" id="he-lat" placeholder="e.g. 41.9053"></label>
+          <label>Longitude<input type="text" id="he-lng" placeholder="e.g. 12.4886"></label>
+        </div>
+        <label>Getting to/from it
+          <select id="he-mode">
+            <option value="walk">Normal (walk / street network)</option>
+            <option value="boat">Boat shuttle only (island resort etc.)</option>
+          </select>
+        </label>
+        <label>Photo URL<input type="text" id="he-img" placeholder="https://…"></label>
+        <label>Description<textarea id="he-desc" rows="2"></textarea></label>
+        <button type="submit" class="reset-btn">Save hotel</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Trip settings modal -->
+<div class="modal-overlay" id="settings-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="settings-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title">Trip settings</h3>
+      <form id="settings-form" class="add-location-form">
+        <label>Trip name<input type="text" id="st-name" required></label>
+        <label>Subtitle<textarea id="st-subtitle" rows="2"></textarea></label>
+        <label>Number of days<input type="number" id="st-days" min="1" max="60" required></label>
+        <label>Start date (optional — gives every day a real weekday)<input type="date" id="st-date"></label>
+        <label>Color scheme</label>
+        <div class="theme-picker" id="theme-picker"></div>
+        <button type="submit" class="reset-btn">Save settings</button>
+      </form>
+      <div class="settings-tools">
+        <h3 class="modal-subhead">Whole-trip tools</h3>
+        <button class="reset-btn" id="st-distribute" title="Reassign stops to days by geography and time budget, then order each day">✨ Distribute stops across days &amp; optimise</button>
+        <button class="reset-btn danger" id="st-clear">Start a new blank trip</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
