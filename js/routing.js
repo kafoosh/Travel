@@ -162,7 +162,9 @@ function legKey(a, b, profile){
 
 function storeResult(key, minutes, mode, path){
   cache[key] = { m: minutes, mode, t: Date.now() };
-  if(path && path.length > 1) shapes[key] = { p: roundPath(simplifyPath(path)), t: Date.now() };
+  // Always write a shape entry — p:null is a sentinel meaning "the server
+  // answered without geometry", so cache hits know not to refetch forever.
+  shapes[key] = { p: (path && path.length > 1) ? roundPath(simplifyPath(path)) : null, t: Date.now() };
   cacheDirty = true;
   notify();
 }
@@ -362,16 +364,26 @@ export function estimateLeg(a, b, opts = {}){
   const hit = cache[key];
   if(hit){
     const sh = shapes[key];
-    return { minutes: hit.m, mode: hit.mode, live: true, path: sh ? sh.p : null };
+    // A duration cached before the geometry feature existed (or whose shape
+    // was pruned) has no shape entry at all — backfill it with one fetch.
+    // p:null means the server already answered without geometry: don't retry.
+    if(sh === undefined) queueLegFetch(key, a, b, profile, opts);
+    return { minutes: hit.m, mode: hit.mode, live: true, path: (sh && sh.p) ? sh.p : null };
   }
 
   // Cache miss: return the guess now, fetch the real number in the background.
+  queueLegFetch(key, a, b, profile, opts);
+  return guess;
+}
+
+function queueLegFetch(key, a, b, profile, opts){
   if(profile === 'walk' && providerOk('valhalla')){
     enqueue(key, async () => {
       const r = await fetchValhalla(a, b, 'pedestrian');
       storeResult(key, r.minutes, 'walk', r.path);
     });
   } else if(profile === 'transit'){
+    if(!providerOk('transitous') && !providerOk('valhalla')) return;
     enqueue(key, async () => {
       if(providerOk('transitous')){
         try{
@@ -388,7 +400,6 @@ export function estimateLeg(a, b, opts = {}){
       }
     });
   }
-  return guess;
 }
 
 /* Used by the optimiser: best-known minutes right now, no fetching. */

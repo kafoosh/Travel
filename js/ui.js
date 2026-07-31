@@ -14,6 +14,7 @@ import { optimizeDayOrder, distributeAcrossDays } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt } from './llm.js';
+import { attachAutocomplete } from './geocode.js';
 
 const ICONS = {
   landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
@@ -1232,6 +1233,7 @@ function renderFooter(){
       ? 'Live travel times: <a href="https://valhalla.openstreetmap.de">Valhalla (FOSSGIS)</a> for walking &amp; driving, <a href="https://transitous.org">Transitous</a> for public transport' +
         (rs.pending ? ' · ◌ fetching ' + rs.pending + '…' : '')
       : 'Live routing unreachable right now — times shown are distance-based estimates') +
+    ' · Place search: <a href="https://photon.komoot.io">Photon</a>' +
     ' · Times marked <span class="est">· est</span> are estimates pending a routed answer.';
 }
 
@@ -1315,6 +1317,19 @@ export function wireStaticHandlers(){
         return;
       }
     }
+  });
+
+  // place search: typing a name suggests real places and fills coordinates
+  attachAutocomplete($('al-name'), (r) => {
+    $('al-name').value = r.name;
+    $('al-lat').value = r.lat;
+    $('al-lng').value = r.lng;
+    if(!$('al-editing').value) $('al-cat').value = r.cat;   // don't override an existing stop's category
+  });
+  attachAutocomplete($('he-name'), (r) => {
+    $('he-name').value = r.name;
+    $('he-lat').value = r.lat;
+    $('he-lng').value = r.lng;
   });
 
   // disarm drag armed on a handle press that never became a drag

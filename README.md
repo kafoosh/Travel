@@ -125,8 +125,11 @@ The site uses two public, fair-use servers with no signup:
 
 | Service | What for | Run by |
 |---|---|---|
-| `valhalla1.openstreetmap.de` | walking & driving legs | [FOSSGIS e.V.](https://www.fossgis.de/) (German OSM chapter) |
-| `api.transitous.org` | public transport legs | [Transitous](https://transitous.org) community |
+| `valhalla1.openstreetmap.de` | walking & driving legs (time + route geometry) | [FOSSGIS e.V.](https://www.fossgis.de/) (German OSM chapter) |
+| `api.transitous.org` | public transport legs (time + route geometry) | [Transitous](https://transitous.org) community |
+| `photon.komoot.io` | place search / autocomplete in the add-location and hotel forms | [komoot](https://photon.komoot.io) — OSM-based, built for type-ahead |
+
+All three bases are overridable via localStorage (`routing.valhallaBase`, `routing.transitousBase`, `routing.photonBase`) for self-hosting or testing.
 
 Requests go through a small sequential queue (~3/s max), are cached in `localStorage` (OSM data is ODbL-licensed — caching is explicitly fine), retried with backoff, and identified with an `X-Client-Id` header. If either server is unreachable the site silently falls back to distance-based estimates and says so in the footer. If this project ever grows real traffic, the right move is self-hosting Valhalla on a small VPS — please don't point a busy site at community demo servers.
 
