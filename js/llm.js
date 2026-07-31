@@ -24,7 +24,8 @@ First, ask me what changes I want (unless I've already told you). Changes might 
 
 RULES
 =====
-- Output ONE complete markdown document in EXACTLY the same format as the current plan below — the ENTIRE updated trip, not a diff, not just the changed days. No commentary before or after the document, no code fences.
+- Output ONE complete document in EXACTLY the same format as the current plan below — the ENTIRE updated trip, not a diff, not just the changed days.
+- Put the whole document inside a single fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste — they are load-bearing. Write nothing after the block. (If I ask for a file, save the same content as .md or .txt.)
 - Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line.
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
@@ -44,7 +45,10 @@ function buildNewPrompt(trip){
   if(!hasName) asks.push('where I am going');
   asks.push(hasName ? `anything about my interests, pace, and budget you need` : 'my interests, pace, and budget');
 
-  return `You are a travel-planning assistant. Plan a trip for me and output it as ONE markdown document in EXACTLY the format specified below — no commentary before or after the document, no code fences.
+  return `You are a travel-planning assistant. Plan a trip for me and output it as ONE plain-text document in EXACTLY the format specified below.
+
+CRITICAL — HOW TO OUTPUT:
+Put the ENTIRE document inside a single fenced code block (start a line with three backticks, then the document, then a line with three backticks). This keeps the "#", "##", "###" and "- " characters intact when I copy it — they are load-bearing and MUST survive copy-paste. Do NOT render it as normal formatted markdown, and write nothing before or after the code block except, if you like, one short sentence and then the block. I will copy the block's contents and paste or import them into my trip planner. (If I ask for a file instead, save the same content as a .md or .txt file — the format is identical.)
 
 ${hasName ? `Destination / trip: ${trip.name}` : 'First ask me where I am going, for how many days, and roughly when.'}
 Number of days: ${dayCount}${trip.startDate ? `\nTrip start date: ${trip.startDate} (use real weekdays for closures and events)` : ''}
@@ -80,6 +84,7 @@ FORMAT SPECIFICATION
 - category: <one of: landmark | museum | church | park | view | food | shop | hike | hotel | flight | travel | boat | other>
 - duration: <realistic visit length in minutes>
 - fixed start: <optional HH:MM for things pinned to a clock: flight landing/boarding time, train departure, timed museum entry. The schedule waits for it and flags conflicts.>
+- arrive by: <optional: walk | cycle | transit | taxi | boat — pins how the traveller reaches THIS stop when one mode clearly makes sense (a ferry-only island, a cycling city, a stop best reached by taxi). Omit for automatic selection.>
 - image: <public image URL, optional — prefer Wikimedia Commons: https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200>
 - description: <1–2 sentences: what it is and one practical tip (booking, timing, closures)>
 - detail: <2–4 sentences of history or a great story — the kind of thing a knowledgeable friend would tell you standing in front of it>
@@ -121,7 +126,7 @@ Arrival/departure days: model the flight or train as its own stop — category "
 
 RULES
 =====
-- Output must start with "# Trip:" — nothing before it.
+- Wrap the whole document in one fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste. Inside the block, it starts with "# Trip:".
 - Every location MUST have real lat/lng coordinates (decimal degrees). Accuracy matters: they drive the map and travel-time estimates.
 - Durations are visit time only; travel between stops is computed automatically.
 - Keep each "- key: value" on a single line (no line breaks inside a value).

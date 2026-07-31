@@ -53,6 +53,7 @@ export function normalizeTrip(t){
     id: i + 1, title: d.title || ('Day ' + (i + 1)), start: d.start || '09:00',
     hotelId: d.hotelId || null,
     bookend: ['start','end'].includes(d.bookend) ? d.bookend : 'both',
+    returnBy: ['walk','cycle','transit','taxi','boat'].includes(d.returnBy) ? d.returnBy : null,
     order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
   }));
   if(!trip.days.length) trip.days = base.days;
@@ -63,6 +64,7 @@ export function normalizeTrip(t){
   Object.values(trip.stops).forEach(s => {
     if(!Array.isArray(s.tags)) s.tags = [];
     if(s.notes == null) s.notes = '';
+    if(!['walk','cycle','transit','taxi','boat'].includes(s.arriveBy)) s.arriveBy = null;
   });
   return trip;
 }

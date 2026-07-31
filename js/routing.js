@@ -54,15 +54,22 @@ function round5(m){ return Math.max(5, Math.round(m / 5) * 5); }
 
 export function heuristicLeg(a, b, opts = {}){
   const rawKm = haversineKm(a.lat, a.lng, b.lat, b.lng);
-  if(opts.boat){
-    // Hotel boat shuttle (e.g. a private-island resort): ~11 km/h door to door.
+  const m = opts.mode || null;    // explicit per-leg mode, or null for automatic
+  if(opts.boat || m === 'boat'){
+    // Boat shuttle / water taxi: ~11 km/h door to door.
     return { minutes: Math.max(10, round5(rawKm / 11 * 60)), mode:'boat', live:false, path:null, distKm: rawKm };
   }
   const walkKm = rawKm * circuity(rawKm);
-  if(opts.forceWalk || walkKm <= WALK_MAX_KM){
+  if(m === 'cycle'){
+    return { minutes: Math.max(5, round5(walkKm / 13 * 60)), mode:'cycle', live:false, path:null, distKm: walkKm };
+  }
+  if(m === 'taxi'){
+    return { minutes: Math.max(8, round5(rawKm * 1.25 / 18 * 60 + 8)), mode:'taxi', live:false, path:null, distKm: rawKm * 1.25 };
+  }
+  if(m === 'walk' || opts.forceWalk || (!m && walkKm <= WALK_MAX_KM)){
     return { minutes: round5(walkKm / WALK_KMH * 60), mode:'walk', live:false, path:null, distKm: walkKm };
   }
-  // Generic surface transit/taxi guess: ~14 km/h effective + boarding overhead.
+  // Generic surface transit guess: ~14 km/h effective + boarding overhead.
   return { minutes: Math.max(12, round5(rawKm * 1.2 / 14 * 60 + 8)), mode:'transit', live:false, path:null, distKm: rawKm * 1.2 };
 }
 
@@ -327,13 +334,28 @@ async function fetchTransitous(a, b, whenIso){
           const path = transitPath(it, a, b);
           const legDist = (it.legs || []).reduce((n, l) => n + (typeof l.distance === 'number' ? l.distance : 0), 0);
           const distKm = legDist > 0 ? legDist / 1000 : pathLengthKm(path);
-          return { minutes: Math.max(1, Math.round(sec / 60)), path, distKm };
+          return { minutes: Math.max(1, Math.round(sec / 60)), path, distKm, submode: transitSubmode(it) };
         }
       }
       throw new Error('no itinerary');
     } catch(e){ lastErr = e; }
   }
   throw lastErr || new Error('transit failed');
+}
+
+/* The dominant vehicle of an itinerary (longest non-walk leg), mapped to a
+   display mode: bus, metro, tram, ferry — or generic transit. */
+function transitSubmode(it){
+  const MAP = { BUS:'bus', TROLLEYBUS:'bus', COACH:'bus', SUBWAY:'metro', METRO:'metro', RAIL:'metro',
+    TRAM:'tram', FERRY:'ferry', BOAT:'ferry', AERIAL_TRAM:'tram', FUNICULAR:'tram' };
+  let best = null, bestDur = -1;
+  (it.legs || []).forEach(l => {
+    const md = String(l.mode || '').toUpperCase();
+    if(md === 'WALK' || !md) return;
+    const dur = typeof l.duration === 'number' ? l.duration : 0;
+    if(dur > bestDur){ bestDur = dur; best = MAP[md] || 'transit'; }
+  });
+  return best || 'transit';
 }
 
 /* Stitch an itinerary's leg geometries into one path. Legs carry OTP-style
@@ -370,10 +392,12 @@ export function estimateLeg(a, b, opts = {}){
 
   const guess = heuristicLeg(a, b, opts);
 
-  // Private hotel boat shuttles aren't in any public dataset — heuristic only.
-  if(opts.boat) return guess;
+  // Boat shuttles / water taxis aren't in any public dataset — heuristic only.
+  if(opts.boat || opts.mode === 'boat') return guess;
 
-  const profile = guess.mode === 'walk' ? 'walk' : 'transit';
+  const profile = opts.mode && ['walk','cycle','taxi','transit'].includes(opts.mode)
+    ? opts.mode
+    : (guess.mode === 'walk' ? 'walk' : 'transit');
   const key = legKey(a, b, profile);
   const hit = cache[key];
   if(hit){
@@ -393,10 +417,12 @@ export function estimateLeg(a, b, opts = {}){
 }
 
 function queueLegFetch(key, a, b, profile, opts){
-  if(profile === 'walk' && providerOk('valhalla')){
+  if((profile === 'walk' || profile === 'cycle' || profile === 'taxi') && providerOk('valhalla')){
+    const costing = profile === 'walk' ? 'pedestrian' : profile === 'cycle' ? 'bicycle' : 'auto';
     enqueue(key, async () => {
-      const r = await fetchValhalla(a, b, 'pedestrian');
-      storeResult(key, r.minutes, 'walk', r.path, r.distKm);
+      const r = await fetchValhalla(a, b, costing);
+      const extra = profile === 'taxi' ? 6 : 0;   // hail/park overhead
+      storeResult(key, r.minutes + extra, profile, r.path, r.distKm);
     });
   } else if(profile === 'transit'){
     if(!providerOk('transitous') && !providerOk('valhalla')) return;
@@ -404,7 +430,7 @@ function queueLegFetch(key, a, b, profile, opts){
       if(providerOk('transitous')){
         try{
           const r = await fetchTransitous(a, b, transitTime(opts.dayDate, opts.departMinutes ?? 600));
-          storeResult(key, r.minutes, 'transit', r.path, r.distKm);
+          storeResult(key, r.minutes, r.submode || 'transit', r.path, r.distKm);
           return;
         } catch(e){ /* fall through to a driving estimate */ }
       }
@@ -422,8 +448,11 @@ function queueLegFetch(key, a, b, profile, opts){
 export function knownMinutes(a, b, opts = {}){
   if(!a || !b || a.lat == null || b.lat == null) return 0;
   const guess = heuristicLeg(a, b, opts);
-  if(opts.boat) return guess.minutes;
-  const key = legKey(a, b, guess.mode === 'walk' ? 'walk' : 'transit');
+  if(opts.boat || opts.mode === 'boat') return guess.minutes;
+  const profile = opts.mode && ['walk','cycle','taxi','transit'].includes(opts.mode)
+    ? opts.mode
+    : (guess.mode === 'walk' ? 'walk' : 'transit');
+  const key = legKey(a, b, profile);
   return cache[key] ? cache[key].m : guess.minutes;
 }
 

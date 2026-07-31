@@ -54,6 +54,13 @@ const c2 = Object.values(t2.stops).find(s => s.name === 'Colosseum');
 check('multi-line notes survive', c2.notes === colosseum.notes);
 check('fixed start survives', c2.fixedStart === '09:20');
 check('day bookend survives', t2.days[0].bookend === 'end');
+check('arrive-by survives', (() => {
+  colosseum.arriveBy = 'taxi';
+  trip.days[1].returnBy = 'cycle';
+  const t3 = parseTrip(serializeTrip(trip)).trip;
+  const c3 = Object.values(t3.stops).find(s => s.name === 'Colosseum');
+  return c3.arriveBy === 'taxi' && t3.days[1].returnBy === 'cycle';
+})());
 const h2 = Object.values(t2.stops).find(s => s.name === 'Sentiero degli Dei');
 check('hike end coords survive', h2 && h2.cat === 'hike' && h2.endLat === 40.614 && h2.endLng === 14.478);
 check('extended trip still a fixed point', JSON.stringify(t2) === JSON.stringify(parseTrip(serializeTrip(t2)).trip));
@@ -73,6 +80,21 @@ check('quoted field with comma', Object.values(ct.stops)[0].desc === 'Book the s
 check('importText sniffs CSV', (() => { try{ return importText(csv).trip.days.length === 2; } catch(e){ return false; } })());
 check('importText sniffs markdown', (() => { try{ return importText(md).trip.days.length === 10; } catch(e){ return false; } })());
 check('garbage rejected with message', (() => { try{ importText('hello world'); return false; } catch(e){ return true; } })());
+
+/* --- 3b. resilient import: chat-mangled LLM output --- */
+console.log('resilient import:');
+const fenced = '```markdown\n' + md + '```';
+check('fenced code block unwrapped', importText(fenced).trip.days.length === 10);
+// A chat UI that RENDERS markdown strips the #/- markers on copy.
+const stripped = md.split('\n').map(l => l.replace(/^#{1,3}\s+/, '').replace(/^- /, '')).join('\n');
+const rec = importText(stripped).trip;
+check('stripped markers recovered: days', rec.days.length === 10, String(rec.days.length));
+check('stripped markers recovered: stops', Object.keys(rec.stops).length === 79, String(Object.keys(rec.stops).length));
+check('stripped markers recovered: hotels + optional', rec.hotels.length === 3 && rec.optional.length === 11);
+const recCol = Object.values(rec.stops).find(s => s.name === 'Colosseum');
+check('stripped: stop fields intact', recCol && recCol.dur === 105 && recCol.cat === 'landmark' && recCol.lat === 41.8902);
+check('stripped: trip info sections recovered', ['weather','closures','reservations','events','notes'].every(k => rec.info[k].length > 50));
+check('stripped + fenced together', importText('Here you go:\n\n```\n' + stripped + '\n```').trip.days.length === 10);
 
 /* --- 4. optimiser --- */
 console.log('optimiser:');

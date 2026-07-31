@@ -182,6 +182,83 @@ function orderStops(stops, startPt, endPt){
   return head ? [head, ...path] : path;
 }
 
+/* ---- meal placement ----
+   People eat lunch around midday and dinner in the evening; a geographically
+   perfect route that schedules dinner at 9:50 AM is a bad plan. After a day's
+   route is built, food stops are re-slotted to the position whose simulated
+   clock time lands nearest their meal window, trading a little extra walking
+   for a sane mealtime. ---- */
+const MEAL_TARGET = { lunch: 12 * 60 + 45, dinner: 19 * 60 + 30 };
+
+function foodRole(s){
+  const n = s.name.toLowerCase();
+  if(/lunch|brunch|pranzo|d[ée]jeuner|almuerzo/.test(n)) return 'lunch';
+  if(/dinner|supper|cena|d[îi]ner/.test(n)) return 'dinner';
+  return null;
+}
+
+/* Simulated start times for a sequence (heuristic legs, fixed starts honoured). */
+function simTimes(day, seq){
+  let t = parseTime(day.start);
+  const starts = [];
+  let prev = null;
+  seq.forEach(s => {
+    if(prev && prev.lat != null && s.lat != null) t += legMinutes(prev, s, false);
+    if(s.fixedStart){
+      const m = /^(\d{1,2}):(\d{2})$/.exec(s.fixedStart);
+      if(m){ const fs = Number(m[1]) * 60 + Number(m[2]); if(t < fs) t = fs; }
+    }
+    starts.push(t);
+    t += s.dur;
+    if(s.lat != null) prev = (s.cat === 'hike' && s.endLat != null) ? { lat: s.endLat, lng: s.endLng } : s;
+  });
+  return { starts, end: t };
+}
+
+function placeMeals(day, seq){
+  const foods = seq.filter(s => s.cat === 'food' && !s.fixedStart);
+  if(!foods.length || seq.length < 3) return seq;
+  let base = seq.filter(s => !foods.includes(s));
+
+  // role assignment: names first (Lunch —, Dinner —), then fill by order
+  const roles = new Map();
+  const unnamed = [];
+  foods.forEach(f => {
+    const r = foodRole(f);
+    if(r) roles.set(f, r);       // named meals keep their name, even duplicates
+    else unnamed.push(f);
+  });
+  unnamed.forEach(f => {
+    if(![...roles.values()].includes('lunch')) roles.set(f, 'lunch');
+    else if(![...roles.values()].includes('dinner')) roles.set(f, 'dinner');
+    else roles.set(f, 'any');
+  });
+
+  // insertion bounds: never before leading anchors or after trailing ones
+  const isAnchor = s => ANCHOR_CATS.includes(s.cat);
+  const lo = () => { let n = 0; while(n < base.length && isAnchor(base[n])) n++; return n; };
+  const hi = () => { let n = base.length; while(n > 0 && isAnchor(base[n - 1])) n--; return n; };
+
+  const order = ['lunch', 'dinner', 'any'];
+  foods.sort((a, b) => order.indexOf(roles.get(a)) - order.indexOf(roles.get(b)))
+    .forEach(f => {
+      const role = roles.get(f);
+      const target = MEAL_TARGET[role];
+      const baseEnd = simTimes(day, base).end;
+      const upper = hi();
+      let best = { p: upper, cost: Infinity };   // fallback: before any trailing anchors
+      for(let p = lo(); p <= upper; p++){
+        const cand = [...base.slice(0, p), f, ...base.slice(p)];
+        const { starts, end } = simTimes(day, cand);
+        const detour = end - baseEnd - f.dur;                 // pure added travel
+        const cost = (target != null ? Math.abs(starts[p] - target) : 0) + Math.min(detour, 90) * 0.25;
+        if(cost < best.cost) best = { p, cost };
+      }
+      base = [...base.slice(0, best.p), f, ...base.slice(best.p)];
+    });
+  return base;
+}
+
 /* Assign all movable stops across the trip's days and order every day.
    Returns {orders: {dayId: [ids]}} without mutating the trip. */
 export function autoPlanOrders(trip){
@@ -425,6 +502,7 @@ export function autoPlanOrders(trip){
         if(next) seq.push(next);
       }
     }
+    seq = placeMeals(d, seq);
     orders[d.id] = [...fixedNoCoord[i], ...seq.map(s => s.id)];
   });
   return { orders };

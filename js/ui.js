@@ -28,8 +28,10 @@ const CAT_LABEL = {
   hotel:'Hotel / check-in', flight:'Flight', travel:'Train / travel leg',
   boat:'Boat / ferry', other:'Other'
 };
-const MODE_ICON = { walk:'🚶', transit:'🚌', taxi:'🚕', boat:'🚤' };
-const MODE_LABEL = { walk:'walk', transit:'transit', taxi:'taxi', boat:'boat shuttle' };
+const MODE_ICON = { walk:'🚶', cycle:'🚲', transit:'🚌', bus:'🚌', metro:'🚇', tram:'🚋', ferry:'⛴️', taxi:'🚕', boat:'🚤' };
+const MODE_LABEL = { walk:'walk', cycle:'cycle', transit:'transit', bus:'bus', metro:'metro', tram:'tram', ferry:'ferry', taxi:'taxi', boat:'boat' };
+// Choosable per-leg overrides (submodes like bus/metro come from the router, not the picker)
+const PICKABLE_MODES = [[null,'Auto'],['walk','🚶 Walk'],['cycle','🚲 Cycle'],['transit','🚌 Transit'],['taxi','🚕 Taxi'],['boat','🚤 Boat']];
 
 const THEME_PREVIEW = {
   parchment:['#E9DFC6','#C1502E','#B8891F'],
@@ -47,6 +49,8 @@ let lastMapDayId = null;
 let mapFitPts = null;
 let mapFitPending = false;
 let modalStopId = null;
+let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
+let promptMode = null;    // sticky mode radio choice
 let pendingFlash = null;   // {id, until} — highlight survives async re-renders
 
 function applyPendingFlash(){
@@ -162,7 +166,7 @@ function renderDayPanel(){
           <span><span class="legend-dot"></span> Stop, in order</span>
           <span><span class="legend-line solid"></span> routed path</span>
           <span><span class="legend-line dashed"></span> estimate</span>
-          <span>🚶 walk</span><span>🚌 transit</span><span>🚕 taxi</span><span>🚤 boat</span>
+          <span>🚶 walk</span><span>🚲 cycle</span><span>🚌 transit</span><span>🚕 taxi</span><span>🚤 boat</span>
         </div>
       </div>
     </div>
@@ -219,11 +223,48 @@ function renderDayPanel(){
   renderMap(day, sched);
 }
 
-function travelConnector(minutes, mode, live, prefixText){
+/* A travel connector line. `target` makes it clickable to override the leg's
+   transport mode: {stopId} sets that stop's arriveBy, {returnDay} sets the
+   day's return-to-hotel mode. */
+function travelConnector(minutes, mode, live, prefixText, target){
   const conn = document.createElement('div');
-  conn.className = 'travel-connector';
+  conn.className = 'travel-connector' + (target ? ' pickable' : '');
+  const override = target ? (target.stopId ? trip().stops[target.stopId]?.arriveBy : target.returnDay.returnBy) : null;
   conn.innerHTML = (MODE_ICON[mode] || '🚶') + ' ' + (prefixText || '') + '~' + minutes + ' min ' +
-    (MODE_LABEL[mode] || mode) + (live ? '' : ' <span class="est" title="Estimated from distance — a routed time will replace this shortly">· est</span>');
+    (MODE_LABEL[mode] || mode) +
+    (override ? ' <span class="mode-pin" title="Transport mode pinned by you">📌</span>' : '') +
+    (live ? '' : ' <span class="est" title="Estimated from distance — a routed time will replace this shortly">· est</span>') +
+    (target ? ' <span class="mode-caret">▾</span>' : '');
+  if(!target) return conn;
+
+  conn.title = 'Click to choose how you travel this leg';
+  conn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const existing = conn.querySelector('.mode-menu');
+    if(existing){ existing.remove(); return; }
+    document.querySelectorAll('.mode-menu').forEach(m => m.remove());
+    const menu = document.createElement('span');
+    menu.className = 'mode-menu';
+    PICKABLE_MODES.forEach(([val, label]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mode-opt' + ((override || null) === val ? ' active' : '');
+      b.textContent = label;
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        menu.remove();                 // clear before refresh, or the open-menu guard skips it
+        pushUndo();
+        if(target.stopId) trip().stops[target.stopId].arriveBy = val;
+        else target.returnDay.returnBy = val;
+        saveState();
+        refreshDaySchedule();
+        updateUndoButton();
+      });
+      menu.appendChild(b);
+    });
+    conn.appendChild(menu);
+    setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+  });
   return conn;
 }
 
@@ -242,12 +283,14 @@ function renderScheduleList(day, sched){
 
   let mapOrder = 0;
   if(hotel && leadTransfer){
-    list.appendChild(travelConnector(leadTransfer.minutes, leadTransfer.mode, leadTransfer.live, 'Depart ' + esc(hotel.name) + ', '));
+    const firstStop = rows.find(r => r.stop.lat != null);
+    list.appendChild(travelConnector(leadTransfer.minutes, leadTransfer.mode, leadTransfer.live,
+      'Depart ' + esc(hotel.name) + ', ', firstStop ? { stopId: firstStop.stop.id } : null));
   }
 
   rows.forEach((row, idx) => {
     if(idx > 0 && row.travelBefore > 0){
-      list.appendChild(travelConnector(row.travelBefore, row.travelMode || 'walk', row.travelLive));
+      list.appendChild(travelConnector(row.travelBefore, row.travelMode || 'walk', row.travelLive, '', { stopId: row.stop.id }));
     }
     if(row.waitBefore > 0){
       const wait = document.createElement('div');
@@ -427,7 +470,7 @@ function renderScheduleList(day, sched){
 
   if(hotel && trailTransfer){
     list.appendChild(travelConnector(trailTransfer.minutes, trailTransfer.mode, trailTransfer.live,
-      'Return to ' + esc(hotel.name) + ', '));
+      'Return to ' + esc(hotel.name) + ', ', { returnDay: day }));
     const arrive = document.createElement('div');
     arrive.className = 'travel-connector';
     arrive.innerHTML = '🏨 Back at the hotel ~' + formatTime(returnTime);
@@ -442,7 +485,7 @@ function renderScheduleList(day, sched){
     totals.className = 'day-totals';
     const parts = [];
     if(walkKm > 0.05) parts.push('🚶 ' + walkKm.toFixed(1) + ' km on foot');
-    if(otherKm > 0.05) parts.push('🚌 ' + otherKm.toFixed(1) + ' km by transit/taxi/boat');
+    if(otherKm > 0.05) parts.push('🚌 ' + otherKm.toFixed(1) + ' km by other modes');
     totals.innerHTML = parts.join(' · ') + ' <span class="est-note">· estimated from routes</span>';
     list.appendChild(totals);
   }
@@ -554,6 +597,7 @@ function renderMap(day, sched){
     mapLayerGroup = L.layerGroup().addTo(leafletMap);
     lastMapDayId = null;
   } else {
+    leafletMap.stop();          // halt any in-flight pan/zoom before mutating layers
     mapLayerGroup.clearLayers();
   }
 
@@ -654,6 +698,9 @@ function renderMap(day, sched){
 function refreshDaySchedule(){
   const day = currentDay();
   if(!document.getElementById('schedule-list')) { renderDayPanel(); return; }
+  // Don't rip the list out from under an open transport-mode menu — a routed
+  // time landing mid-interaction would otherwise close it.
+  if(document.querySelector('.mode-menu')) return;
   const sched = computeSchedule(trip(), day);
   renderScheduleList(day, sched);
   renderMap(day, sched);
@@ -1164,7 +1211,40 @@ function allStopRow(id, fromDay, isOptional, optMeta){
         ? `<select class="restore-to-day">${dayOptions}</select><button class="restore-btn">+ Add</button>`
         : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Optional</option></select>
            <button class="bin-btn" title="Remove to bin">🗑</button>`}
+      <span class="drag-handle" title="Drag to another day or position" role="button" tabindex="0">⠿</span>
     </div>`;
+  row.dataset.id = id;
+  row.dataset.dayId = isOptional ? 'optional' : String(fromDay.id);
+  row.draggable = false;
+  const handle = row.querySelector('.drag-handle');
+  handle.addEventListener('click', e => e.stopPropagation());
+  handle.addEventListener('mousedown', () => { row.draggable = true; });
+  handle.addEventListener('mouseup', () => { row.draggable = false; });
+  row.addEventListener('dragstart', e => {
+    row.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  row.addEventListener('dragend', () => {
+    row.draggable = false;
+    row.classList.remove('dragging');
+    document.querySelectorAll('.all-row, .all-day-head').forEach(x => x.classList.remove('drop-before','drop-after','drop-target'));
+  });
+  row.addEventListener('dragover', e => {
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    row.classList.toggle('drop-before', before);
+    row.classList.toggle('drop-after', !before);
+  });
+  row.addEventListener('dragleave', () => row.classList.remove('drop-before','drop-after'));
+  row.addEventListener('drop', e => {
+    e.preventDefault();
+    const dragId = e.dataTransfer.getData('text/plain');
+    const rect = row.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    allStopsMove(dragId, { type:'row', id, dayId: row.dataset.dayId === 'optional' ? 'optional' : Number(row.dataset.dayId), before });
+  });
   row.querySelector('.stop-main').style.cursor = 'pointer';
   row.querySelector('.stop-main').addEventListener('click', () => openModal(id, null));
   if(isOptional){
@@ -1184,6 +1264,35 @@ function allStopRow(id, fromDay, isOptional, optMeta){
   return row;
 }
 
+/* Apply a drag-drop move in the All Stops list. */
+function allStopsMove(dragId, target){
+  if(!dragId || (target.id && target.id === dragId)) return;
+  pushUndo();
+  trip().days.forEach(dd => { dd.order = dd.order.filter(x => x !== dragId); });
+  trip().optional = trip().optional.filter(o => o.id !== dragId);
+  trip().bin = trip().bin.filter(x => x !== dragId);
+  if(target.type === 'optional'){
+    trip().optional.push({ id: dragId, day: null, note: '' });
+  } else if(target.type === 'day'){
+    const day = trip().days.find(d => d.id === target.dayId);
+    if(day) day.order.push(dragId);
+  } else if(target.type === 'row'){
+    if(target.dayId === 'optional'){
+      trip().optional.push({ id: dragId, day: null, note: '' });
+    } else {
+      const day = trip().days.find(d => d.id === target.dayId);
+      if(!day) return;
+      let idx = day.order.indexOf(target.id);
+      if(idx === -1) idx = day.order.length;
+      else if(!target.before) idx += 1;
+      day.order.splice(idx, 0, dragId);
+    }
+  }
+  saveState();
+  renderAllStops();
+  updateUndoButton();
+}
+
 export function renderAllStops(){
   const el = $('all-list');
   if(!el) return;
@@ -1192,10 +1301,19 @@ export function renderAllStops(){
   if(!$('group-days').value || document.activeElement !== $('group-days')){
     $('group-days').value = t.days.length;
   }
+  const wireHeadDrop = (head, target) => {
+    head.addEventListener('dragover', e => { e.preventDefault(); head.classList.add('drop-target'); });
+    head.addEventListener('dragleave', () => head.classList.remove('drop-target'));
+    head.addEventListener('drop', e => {
+      e.preventDefault();
+      allStopsMove(e.dataTransfer.getData('text/plain'), target);
+    });
+  };
   t.days.forEach(d => {
     const head = document.createElement('div');
     head.className = 'all-day-head';
     head.textContent = 'Day ' + d.id + ' — ' + d.title + ' (' + d.order.length + ')';
+    wireHeadDrop(head, { type:'day', dayId: d.id });
     el.appendChild(head);
     d.order.forEach(id => {
       const row = allStopRow(id, d, false);
@@ -1206,6 +1324,7 @@ export function renderAllStops(){
     const head = document.createElement('div');
     head.className = 'all-day-head';
     head.textContent = 'Optional ideas (' + t.optional.length + ')';
+    wireHeadDrop(head, { type:'optional' });
     el.appendChild(head);
     t.optional.forEach(o => {
       const row = allStopRow(o.id, null, true, o);
@@ -1366,10 +1485,12 @@ export function renderInfo(){
         <label><input type="radio" name="prompt-mode" value="new"> Plan a new trip from scratch</label>
         <label><input type="radio" name="prompt-mode" value="edit"> Edit this trip — the prompt includes the current plan so the AI knows exactly what exists, and returns the full updated trip to import back</label>
       </div>
-      <textarea class="prompt-area" id="llm-prompt" readonly></textarea>
+      <textarea class="prompt-area" id="llm-prompt" spellcheck="false"></textarea>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="copy-prompt">Copy prompt</button>
+        <button class="reset-btn" id="reset-prompt" title="Regenerate the prompt from the current trip, discarding your edits">↺ Reset prompt</button>
       </div>
+      <p class="al-hint">The prompt is editable — tweak it before copying. Switching mode or pressing Reset regenerates it.</p>
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Import &amp; export</h3>
@@ -1383,6 +1504,7 @@ export function renderInfo(){
       </div>
       <p style="margin:12px 0 4px;">…or paste a trip here:</p>
       <textarea class="import-area" id="import-paste" placeholder="# Trip: My Trip&#10;&#10;## Day 1: …"></textarea>
+      <p class="al-hint">Pasting from a chat works even if it swallowed the formatting — code fences are unwrapped and lost <code>#</code>/<code>-</code> markers are reconstructed automatically.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="import-paste-btn">Import pasted text</button>
       </div>
@@ -1442,18 +1564,24 @@ export function renderInfo(){
     }, 600));
   });
 
-  // LLM prompt — default to 'edit' once the trip actually has content
+  // LLM prompt — default to 'edit' once the trip actually has content.
+  // The textarea is editable; user edits stick (per session) until the mode
+  // changes or Reset is pressed.
   const defaultMode = Object.keys(t.stops).length ? 'edit' : 'new';
-  const refreshPrompt = () => {
+  const refreshPrompt = (force) => {
+    if(promptEdits != null && !force){ $('llm-prompt').value = promptEdits; return; }
     const mode = (el.querySelector('input[name="prompt-mode"]:checked') || {}).value || 'new';
+    promptEdits = null;
     $('llm-prompt').value = buildPrompt(trip(), mode);
   };
   el.querySelectorAll('input[name="prompt-mode"]').forEach(r => {
-    r.checked = r.value === defaultMode;
-    r.addEventListener('change', refreshPrompt);
+    r.checked = promptMode ? r.value === promptMode : r.value === defaultMode;
+    r.addEventListener('change', () => { promptMode = r.value; refreshPrompt(true); });
   });
+  $('llm-prompt').addEventListener('input', () => { promptEdits = $('llm-prompt').value; });
   refreshPrompt();
   $('copy-prompt').addEventListener('click', () => copyText($('llm-prompt').value, $('copy-prompt'), 'Copy prompt'));
+  $('reset-prompt').addEventListener('click', () => refreshPrompt(true));
 
   // import / export
   $('export-btn').addEventListener('click', exportTrip);
@@ -1549,6 +1677,18 @@ async function loadDemo(){
    CLOUD UI
    ========================================================= */
 export function renderCloudUI(){
+  const ss = $('save-share-btn');
+  if(ss){
+    if(cloud.room){
+      ss.textContent = cloud.status === 'connecting' ? '◌ Saving…' : '🔗 Share';
+      ss.title = 'Copy the shareable link to this trip';
+    } else {
+      ss.textContent = '💾 Save';
+      ss.title = cloud.configured
+        ? 'Save this trip to the cloud and get a shareable link'
+        : 'Sharing isn’t configured on this deployment — see Trip Info';
+    }
+  }
   const chip = $('cloud-chip');
   if(chip){
     const on = cloud.status !== 'local';
@@ -1715,6 +1855,7 @@ export function wireStaticHandlers(){
   on('ap-accept', 'click', acceptAutoPlan);
   on('auto-plan-overlay', 'click', (e) => { if(e.target.id === 'auto-plan-overlay') closeAutoPlan(); });
   on('add-optional-btn', 'click', () => openLocationForm(null, 'optional'));
+  on('all-add-btn', 'click', () => openLocationForm(null, currentDay().id));
 
   // search
   on('btn-search', 'click', openSearch);
@@ -1734,6 +1875,19 @@ export function wireStaticHandlers(){
   on('btn-settings', 'click', openSettings);
   on('trip-title', 'click', openSettings);
   on('cloud-chip', 'click', () => setView('info'));
+  on('save-share-btn', 'click', async () => {
+    const btn = $('save-share-btn');
+    if(cloud.room){
+      await copyText(shareUrl(cloud.room), btn, '🔗 Share');
+    } else if(cloud.configured){
+      btn.textContent = '◌ Saving…';
+      await createRoom();
+      renderCloudUI();
+      if(cloud.room) copyText(shareUrl(cloud.room), btn, '🔗 Share');
+    } else {
+      setView('info');   // the share card explains the one-time setup
+    }
+  });
   on('undo-btn', 'click', () => {
     if(popUndo()){
       applyTheme();
@@ -1824,7 +1978,7 @@ export function wireStaticHandlers(){
 
   // disarm drag armed on a handle press that never became a drag
   document.addEventListener('mouseup', () => {
-    document.querySelectorAll('.stop-card[draggable="true"]').forEach(c => { c.draggable = false; });
+    document.querySelectorAll('.stop-card[draggable="true"], .all-row[draggable="true"]').forEach(c => { c.draggable = false; });
   });
 
   // routed travel times landing → refresh the schedule quietly

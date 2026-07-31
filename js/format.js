@@ -21,7 +21,7 @@ export const THEMES = ['parchment','lagoon','terracotta','midnight','field-notes
 
 export function newDay(n){
   // bookend: which ends of the day the hotel anchors — 'both' | 'start' | 'end'
-  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', order:[] };
+  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', returnBy:null, order:[] };
 }
 
 export function blankTrip(){
@@ -59,6 +59,7 @@ function stopLines(s){
   out.push('- category: ' + (s.cat || 'other'));
   out.push('- duration: ' + (s.dur ?? DEFAULT_DUR[s.cat] ?? 45));
   if(s.fixedStart) out.push('- fixed start: ' + s.fixedStart);
+  if(s.arriveBy) out.push('- arrive by: ' + s.arriveBy);
   if(s.img) out.push('- image: ' + encVal(s.img));
   if(s.desc) out.push('- description: ' + encVal(s.desc));
   if(s.detail) out.push('- detail: ' + encVal(s.detail));
@@ -97,6 +98,7 @@ export function serializeTrip(trip){
     const hotel = trip.hotels.find(h => h.id === d.hotelId);
     L.push('- hotel: ' + (hotel ? hotel.name : 'none'));
     if(hotel && d.bookend && d.bookend !== 'both') L.push('- hotel bookend: ' + d.bookend);
+    if(d.returnBy) L.push('- return by: ' + d.returnBy);
     L.push('');
     d.order.forEach(id => {
       const s = trip.stops[id];
@@ -155,6 +157,8 @@ const KEY_ALIASES = {
   'end lng':'endLng', 'end lon':'endLng', 'end longitude':'endLng', endlng:'endLng',
   'fixed start':'fixedStart', 'fixed time':'fixedStart', fixed:'fixedStart',
   'hotel bookend':'bookend', bookend:'bookend',
+  'arrive by':'arriveBy', arriveby:'arriveBy', 'transport to':'arriveBy', 'travel by':'arriveBy',
+  'return by':'returnBy', returnby:'returnBy',
   category:'cat', cat:'cat', type:'cat',
   duration:'dur', dur:'dur', minutes:'dur', time:'dur',
   image:'img', img:'img', photo:'img', picture:'img',
@@ -208,10 +212,48 @@ function normCat(v){
   return map[c] || 'other';
 }
 
+/* Recover markdown structure from text whose "#"/"##"/"###"/"- " markers were
+   stripped — e.g. copied out of a chat UI that rendered the markdown. Only
+   kicks in when NO heading markers survive but the shape is recognisable
+   (a "Trip:"/"Day N:" line, then "key: value" lines). Idempotent on real
+   markdown, which already has the markers. */
+function recoverStructure(text){
+  const lines = text.split(/\r?\n/);
+  if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
+  const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme)\s*:/i;
+  const TOP = /^(hotels?|optional|bin|trip\s*info)\s*$/i;
+  const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
+  const out = [];
+  let started = false, inInfo = false;
+  for(let i = 0; i < lines.length; i++){
+    const raw = lines[i];
+    const line = raw.trim();
+    if(!line){ out.push(''); continue; }
+    const next = (lines[i + 1] || '').trim();
+    if(/^trip\s*:/i.test(line)){ out.push('# ' + line); started = true; continue; }
+    if(/^day\s+\d+\s*[:—–-]/i.test(line)){ out.push('## ' + line); started = true; inInfo = false; continue; }
+    if(TOP.test(line)){ out.push('## ' + line); inInfo = /trip\s*info/i.test(line); continue; }
+    // Once inside Trip Info, its subsection titles are ### and their prose is free text.
+    if(inInfo && INFOSUB.test(line)){ out.push('### ' + line); continue; }
+    if(KEYS.test(line)){ out.push('- ' + line); continue; }
+    // A bare line immediately followed by a key:value line is a heading (hotel
+    // or stop name) that lost its "###". Inside Trip Info everything is prose.
+    if(started && !inInfo && KEYS.test(next)){ out.push('### ' + line); continue; }
+    out.push(raw);
+  }
+  return out.join('\n');
+}
+
 /* Parse the markdown trip format. Returns {trip, warnings}. Throws only when
    the text yields nothing usable at all. */
 export function parseTrip(text){
   const warnings = [];
+  // Unwrap a fenced code block (```…```), then recover any stripped markers.
+  let src = String(text || '');
+  const fence = /```[a-zA-Z]*\n([\s\S]*?)```/.exec(src);
+  if(fence) src = fence[1];
+  src = recoverStructure(src);
+  text = src;
   const trip = blankTrip();
   trip.days = [];
 
@@ -240,6 +282,7 @@ export function parseTrip(text){
         lat: cur.lat ?? null, lng: cur.lng ?? null,
         endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
         fixedStart: cur.fixedStart || null,
+        arriveBy: cur.arriveBy || null,
         img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
         notes: cur.notes || '', tags: cur.tags || [] };
       trip.stops[id] = stop;
@@ -308,6 +351,7 @@ export function parseTrip(text){
       if(cur){
         if(key === 'lat' || key === 'lng' || key === 'endLat' || key === 'endLng'){ const n = parseFloat(value); if(!isNaN(n)) cur[key] = n; }
         else if(key === 'fixedStart'){ if(/^\d{1,2}:\d{2}$/.test(value)) cur.fixedStart = value; }
+        else if(key === 'arriveBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) cur.arriveBy = v; }
         else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
         else if(key === 'cat') cur.cat = normCat(value);
         else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
@@ -319,6 +363,7 @@ export function parseTrip(text){
         if(key === 'start' && /^\d{1,2}:\d{2}$/.test(value)) section.start = value;
         else if(key === 'hotel') section.__hotelName = /^(none|no|-|)$/i.test(value) ? null : value;
         else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.bookend = value.toLowerCase();
+        else if(key === 'returnBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) section.returnBy = v; }
       } else if(!section){
         // trip-level metadata
         if(key === 'subtitle') trip.subtitle = decVal(value);
@@ -437,11 +482,17 @@ export function parseCsv(text){
 
 /* Sniff which parser a pasted/uploaded text wants. */
 export function importText(text){
-  const t = String(text || '').trim();
+  let t = String(text || '').trim();
   if(!t) throw new Error('Nothing to import.');
+  // Unwrap a fenced code block up front so sniffing sees the real content.
+  const fence = /```[a-zA-Z]*\n([\s\S]*?)```/.exec(t);
+  if(fence) t = fence[1].trim();
   const firstLines = t.split(/\r?\n/, 5);
-  const looksMd = /^#/.test(t) || t.includes('\n#') || firstLines.some(l => /^[-*]?\s*\w[\w ]*:\s/.test(l) && !l.includes(','));
-  const looksCsv = firstLines[0] && firstLines[0].split(',').length >= 2 && /name/i.test(firstLines[0]);
+  // Trip/Day markers (with or without their "#") are the strongest signal.
+  const looksTrip = /^#{0,3}\s*(Trip|Day\s+\d+)\s*:/im.test(t);
+  const looksMd = looksTrip || /^#/.test(t) || t.includes('\n#') ||
+    firstLines.some(l => /^[-*]?\s*\w[\w ]*:\s/.test(l) && !l.includes(','));
+  const looksCsv = firstLines[0] && firstLines[0].split(',').length >= 2 && /name/i.test(firstLines[0]) && !looksTrip;
   if(looksCsv && !/^#/.test(t)) return parseCsv(t);
   if(looksMd) return parseTrip(t);
   return parseCsv(t); // last resort; throws a helpful error if it isn't CSV either

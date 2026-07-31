@@ -51,8 +51,11 @@ export function computeSchedule(trip, day){
     prev = { lat: hotel.lat, lng: hotel.lng, __hotel: true };
   }
 
-  const legOpts = (a, b) => ({
-    boat: !!(hotel && hotel.mode === 'boat' && (a.__hotel || b.__hotel)),
+  const legOpts = (a, b, mode) => ({
+    // An explicit per-leg mode wins; otherwise boat-shuttle hotels force
+    // their boat leg and everything else is chosen automatically.
+    mode: mode || null,
+    boat: !mode && !!(hotel && hotel.mode === 'boat' && (a.__hotel || b.__hotel)),
     dayDate: date,
     departMinutes: t,
   });
@@ -68,7 +71,7 @@ export function computeSchedule(trip, day){
     if(!stop) return;
     let travel = 0, mode = null, live = false, path = null;
     if(prev && prev.lat != null && stop.lat != null){
-      const info = estimateLeg(prev, stop, legOpts(prev, stop));
+      const info = estimateLeg(prev, stop, legOpts(prev, stop, stop.arriveBy));
       travel = info.minutes; mode = info.mode; live = info.live; path = info.path;
       countDist(info);
       t += travel;
@@ -109,7 +112,7 @@ export function computeSchedule(trip, day){
     const lastDep = [...rows].map(r => departPoint(r.stop)).reverse().find(Boolean);
     if(lastDep){
       const back = { lat: hotel.lat, lng: hotel.lng, __hotel: true };
-      trailTransfer = estimateLeg(lastDep, back, legOpts(lastDep, back));
+      trailTransfer = estimateLeg(lastDep, back, legOpts(lastDep, back, day.returnBy));
       countDist(trailTransfer);
       t += trailTransfer.minutes;
     }
