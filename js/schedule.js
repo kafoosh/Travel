@@ -38,10 +38,10 @@ export function computeSchedule(trip, day){
   order.forEach((id, idx) => {
     const stop = trip.stops[id];
     if(!stop) return;
-    let travel = 0, mode = null, live = false;
+    let travel = 0, mode = null, live = false, path = null;
     if(prev && prev.lat != null && stop.lat != null){
       const info = estimateLeg(prev, stop, legOpts(prev, stop));
-      travel = info.minutes; mode = info.mode; live = info.live;
+      travel = info.minutes; mode = info.mode; live = info.live; path = info.path;
       t += travel;
       if(rows.length === 0 && prev.__hotel) leadTransfer = info;
     }
@@ -50,7 +50,7 @@ export function computeSchedule(trip, day){
     rows.push({
       stop, start: startMin, end: t,
       travelBefore: (rows.length === 0 && leadTransfer) ? 0 : travel,
-      travelMode: mode, travelLive: live,
+      travelMode: mode, travelLive: live, travelPath: path,
     });
     if(stop.lat != null) prev = stop;
   });

@@ -140,6 +140,8 @@ function renderDayPanel(){
         <div id="map"></div>
         <div class="map-legend">
           <span><span class="legend-dot"></span> Stop, in order</span>
+          <span><span class="legend-line solid"></span> routed path</span>
+          <span><span class="legend-line dashed"></span> estimate</span>
           <span>🚶 walk</span><span>🚌 transit</span><span>🚕 taxi</span><span>🚤 boat</span>
         </div>
       </div>
@@ -492,9 +494,11 @@ function renderMap(day, sched){
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(leafletMap);
 
-  const pts = [];
+  const pts = [];        // marker points, in visit order (drives fitBounds)
+  const segs = [];       // legs between consecutive points: {from, to, path|null}
   let order = 0;
   const hotel = sched.hotel;
+  let prevPt = null;
 
   if(hotel && hotel.lat != null){
     const hotelIcon = L.divIcon({
@@ -506,6 +510,7 @@ function renderMap(day, sched){
     L.marker([hotel.lat, hotel.lng], { icon: hotelIcon }).addTo(leafletMap)
       .bindPopup('<b>' + esc(hotel.name) + '</b><br>start / end of day');
     pts.push([hotel.lat, hotel.lng]);
+    prevPt = [hotel.lat, hotel.lng];
   }
 
   sched.rows.forEach(row => {
@@ -520,23 +525,40 @@ function renderMap(day, sched){
     });
     L.marker([s.lat, s.lng], { icon }).addTo(leafletMap)
       .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start));
-    pts.push([s.lat, s.lng]);
+    const cur = [s.lat, s.lng];
+    // travelPath on a row is the routed geometry of the leg ARRIVING at it
+    // (computed in the same sequence computeSchedule walked).
+    if(prevPt) segs.push({ from: prevPt, to: cur, path: row.travelPath });
+    pts.push(cur);
+    prevPt = cur;
   });
 
   if(hotel && hotel.lat != null && pts.length > 1){
+    segs.push({ from: prevPt, to: [hotel.lat, hotel.lng], path: sched.trailTransfer ? sched.trailTransfer.path : null });
     pts.push([hotel.lat, hotel.lng]);
   }
 
-  mapFitPts = pts;
-  mapFitPending = false;
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C1502E';
-  if(pts.length > 1){
-    L.polyline(pts, { color: accent, weight: 3, dashArray: '6 6', opacity: 0.8 }).addTo(leafletMap);
-    if(!fitMapToDay()){
-      leafletMap.setView(L.latLngBounds(pts).getCenter(), 13);
+  const boundPts = pts.slice();
+  segs.forEach(seg => {
+    if(seg.path && seg.path.length > 1){
+      // Real routed geometry: solid line following the streets/canals.
+      L.polyline(seg.path, { color: accent, weight: 3.5, opacity: 0.85 }).addTo(leafletMap);
+      boundPts.push(...seg.path);
+    } else {
+      // No routed shape (yet, or boat shuttle): dashed straight estimate.
+      L.polyline([seg.from, seg.to], { color: accent, weight: 3, dashArray: '6 6', opacity: 0.7 }).addTo(leafletMap);
     }
-  } else if(pts.length === 1){
-    leafletMap.setView(pts[0], 15);
+  });
+
+  mapFitPts = boundPts;
+  mapFitPending = false;
+  if(boundPts.length > 1){
+    if(!fitMapToDay()){
+      leafletMap.setView(L.latLngBounds(boundPts).getCenter(), 13);
+    }
+  } else if(boundPts.length === 1){
+    leafletMap.setView(boundPts[0], 15);
   } else {
     leafletMap.setView([30, 10], 2);   // blank trip: whole-world view
   }

@@ -19,17 +19,29 @@
      'update' listeners fire and the caller re-renders. Results
      are cached in localStorage (OSM data is ODbL — caching is
      explicitly allowed), so a trip converges to zero requests.
+
+   Alongside the duration, each routed answer keeps the route
+   GEOMETRY (decoded polyline, simplified), so the map can draw
+   the actual street/transit path instead of a straight line.
    ========================================================= */
 
 import { haversineKm } from './util.js';
 
-const VALHALLA = 'https://valhalla1.openstreetmap.de';
-const TRANSITOUS = 'https://api.transitous.org';
+/* Server bases are overridable via localStorage so self-hosters can point at
+   their own instances (and tests at a mock) without touching code. */
+function baseOverride(key, fallback){
+  try{ return localStorage.getItem(key) || fallback; } catch(e){ return fallback; }
+}
+const VALHALLA = baseOverride('routing.valhallaBase', 'https://valhalla1.openstreetmap.de');
+const TRANSITOUS = baseOverride('routing.transitousBase', 'https://api.transitous.org');
 const CLIENT_ID = 'kafoosh-travel-planner';
 
 const CACHE_KEY = 'travelPlanner_routeCache_v1';
+const SHAPE_KEY = 'travelPlanner_shapeCache_v1';
 const CACHE_MAX = 2500;
-const WALK_MAX_KM = 2.2;        // beyond this (street distance) we assume a ride
+const SHAPE_MAX = 300;           // shapes are ~100× bigger than durations — cap harder
+const MAX_SHAPE_PTS = 150;
+const WALK_MAX_KM = 2.2;         // beyond this (street distance) we assume a ride
 const WALK_KMH = 4.5;
 
 /* ---------- heuristic fallback (haversine + circuity) ---------- */
@@ -44,43 +56,115 @@ export function heuristicLeg(a, b, opts = {}){
   const rawKm = haversineKm(a.lat, a.lng, b.lat, b.lng);
   if(opts.boat){
     // Hotel boat shuttle (e.g. a private-island resort): ~11 km/h door to door.
-    return { minutes: Math.max(10, round5(rawKm / 11 * 60)), mode:'boat', live:false };
+    return { minutes: Math.max(10, round5(rawKm / 11 * 60)), mode:'boat', live:false, path:null };
   }
   const walkKm = rawKm * circuity(rawKm);
   if(walkKm <= WALK_MAX_KM){
-    return { minutes: round5(walkKm / WALK_KMH * 60), mode:'walk', live:false };
+    return { minutes: round5(walkKm / WALK_KMH * 60), mode:'walk', live:false, path:null };
   }
   // Generic surface transit/taxi guess: ~14 km/h effective + boarding overhead.
-  return { minutes: Math.max(12, round5(rawKm * 1.2 / 14 * 60 + 8)), mode:'transit', live:false };
+  return { minutes: Math.max(12, round5(rawKm * 1.2 / 14 * 60 + 8)), mode:'transit', live:false, path:null };
 }
 
-/* ---------- persistent cache ---------- */
+/* ---------- polyline geometry ---------- */
 
-let cache = {};
-try{
-  const raw = localStorage.getItem(CACHE_KEY);
-  if(raw) cache = JSON.parse(raw) || {};
-} catch(e){ cache = {}; }
+/* Standard Google encoded-polyline decoder. Valhalla encodes at precision 6;
+   MOTIS/OTP-style APIs vary (5–7), so decodeBest picks whichever precision
+   lands the endpoints nearest the requested locations. */
+export function decodePolyline(str, precision = 6){
+  const factor = 10 ** precision;
+  const coords = [];
+  let index = 0, lat = 0, lng = 0;
+  while(index < str.length){
+    for(const which of [0, 1]){
+      let shift = 0, result = 0, byte;
+      do{
+        byte = str.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while(byte >= 0x20);
+      const delta = (result & 1) ? ~(result >> 1) : (result >> 1);
+      if(which === 0) lat += delta; else lng += delta;
+    }
+    coords.push([lat / factor, lng / factor]);
+  }
+  return coords;
+}
+
+function decodeBest(str, a, b, hintPrecision){
+  const tries = hintPrecision ? [hintPrecision, 7, 6, 5] : [7, 6, 5];
+  let best = null, bestErr = Infinity;
+  for(const p of tries){
+    let c;
+    try{ c = decodePolyline(str, p); } catch(e){ continue; }
+    if(c.length < 2) continue;
+    const err = Math.abs(c[0][0] - a.lat) + Math.abs(c[0][1] - a.lng)
+              + Math.abs(c[c.length-1][0] - b.lat) + Math.abs(c[c.length-1][1] - b.lng);
+    if(err < bestErr){ bestErr = err; best = c; }
+  }
+  return bestErr < 0.05 ? best : null;   // endpoints must land near the request
+}
+
+function simplifyPath(pts){
+  if(!pts || pts.length <= MAX_SHAPE_PTS) return pts;
+  const step = Math.ceil(pts.length / MAX_SHAPE_PTS);
+  const out = pts.filter((_, i) => i % step === 0);
+  if(out[out.length-1] !== pts[pts.length-1]) out.push(pts[pts.length-1]);
+  return out;
+}
+function roundPath(pts){
+  return pts && pts.map(([la, ln]) => [Math.round(la * 1e5) / 1e5, Math.round(ln * 1e5) / 1e5]);
+}
+
+/* ---------- persistent caches ---------- */
+
+function loadJson(key){
+  try{ const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) || {}) : {}; }
+  catch(e){ return {}; }
+}
+let cache = loadJson(CACHE_KEY);    // key -> {m, mode, t}
+let shapes = loadJson(SHAPE_KEY);   // key -> {p: [[lat,lng],…], t}
 
 let cacheDirty = false;
+function prune(obj, max){
+  const keys = Object.keys(obj);
+  if(keys.length > max){
+    keys.sort((x, y) => (obj[x].t || 0) - (obj[y].t || 0))
+      .slice(0, keys.length - max)
+      .forEach(k => { delete obj[k]; });
+  }
+}
 function persistCache(){
   if(!cacheDirty) return;
   cacheDirty = false;
   try{
-    const keys = Object.keys(cache);
-    if(keys.length > CACHE_MAX){
-      keys.sort((x, y) => (cache[x].t || 0) - (cache[y].t || 0))
-        .slice(0, keys.length - CACHE_MAX)
-        .forEach(k => { delete cache[k]; });
-    }
+    prune(cache, CACHE_MAX);
     localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-  } catch(e){ /* storage full/blocked — cache stays in memory */ }
+    prune(shapes, SHAPE_MAX);
+    localStorage.setItem(SHAPE_KEY, JSON.stringify(shapes));
+  } catch(e){
+    // Storage full: drop the bulky shapes, keep durations.
+    try{ shapes = {}; localStorage.removeItem(SHAPE_KEY); localStorage.setItem(CACHE_KEY, JSON.stringify(cache)); } catch(e2){}
+  }
 }
 setInterval(persistCache, 4000);
+// The interval alone loses results that land just before a navigation/reload —
+// flush whenever the page is being hidden, and when the fetch queue drains.
+if(typeof addEventListener === 'function'){
+  addEventListener('pagehide', persistCache);
+  addEventListener('visibilitychange', () => { if(document.visibilityState === 'hidden') persistCache(); });
+}
 
 function r4(x){ return Math.round(x * 1e4) / 1e4; }
 function legKey(a, b, profile){
   return r4(a.lat) + ',' + r4(a.lng) + '>' + r4(b.lat) + ',' + r4(b.lng) + ':' + profile;
+}
+
+function storeResult(key, minutes, mode, path){
+  cache[key] = { m: minutes, mode, t: Date.now() };
+  if(path && path.length > 1) shapes[key] = { p: roundPath(simplifyPath(path)), t: Date.now() };
+  cacheDirty = true;
+  notify();
 }
 
 /* ---------- provider health ---------- */
@@ -147,6 +231,7 @@ async function runWorker(){
     await new Promise(r => setTimeout(r, 300)); // ~3 req/s max, sequential
   }
   workerRunning = false;
+  persistCache();   // queue drained — get the batch onto disk promptly
   notify();
 }
 
@@ -182,7 +267,17 @@ async function fetchValhalla(a, b, costing){
   }, 'valhalla');
   const sec = data && data.trip && data.trip.summary && data.trip.summary.time;
   if(typeof sec !== 'number') throw new Error('no route');
-  return Math.max(1, Math.round(sec / 60));
+  // Valhalla returns each leg's geometry as an encoded polyline at precision 6.
+  let path = null;
+  const legs = (data.trip.legs || []).filter(l => l && l.shape);
+  if(legs.length){
+    path = [];
+    legs.forEach(l => {
+      try{ path.push(...decodePolyline(l.shape, 6)); } catch(e){}
+    });
+    if(path.length < 2) path = null;
+  }
+  return { minutes: Math.max(1, Math.round(sec / 60)), path };
 }
 
 /* ---------- Transitous / MOTIS (public transport) ---------- */
@@ -217,7 +312,9 @@ async function fetchTransitous(a, b, whenIso){
         if(typeof sec !== 'number' && it.startTime && it.endTime){
           sec = (new Date(it.endTime) - new Date(it.startTime)) / 1000;
         }
-        if(typeof sec === 'number' && sec > 0) return Math.max(1, Math.round(sec / 60));
+        if(typeof sec === 'number' && sec > 0){
+          return { minutes: Math.max(1, Math.round(sec / 60)), path: transitPath(it, a, b) };
+        }
       }
       throw new Error('no itinerary');
     } catch(e){ lastErr = e; }
@@ -225,12 +322,35 @@ async function fetchTransitous(a, b, whenIso){
   throw lastErr || new Error('transit failed');
 }
 
+/* Stitch an itinerary's leg geometries into one path. Legs carry OTP-style
+   legGeometry {points, precision?}; endpoints fall back to straight segments. */
+function transitPath(it, a, b){
+  const legs = it.legs;
+  if(!Array.isArray(legs) || !legs.length) return null;
+  const path = [];
+  for(const leg of legs){
+    const from = leg.from && { lat: leg.from.lat, lng: leg.from.lon ?? leg.from.lng };
+    const to = leg.to && { lat: leg.to.lat, lng: leg.to.lon ?? leg.to.lng };
+    const geom = leg.legGeometry && leg.legGeometry.points;
+    let seg = null;
+    if(geom && from && to) seg = decodeBest(geom, from, to, leg.legGeometry.precision);
+    if(!seg && from && to) seg = [[from.lat, from.lng], [to.lat, to.lng]];
+    if(seg) path.push(...seg);
+  }
+  if(path.length < 2) return null;
+  // Anchor the drawn path to the exact requested endpoints.
+  path.unshift([a.lat, a.lng]);
+  path.push([b.lat, b.lng]);
+  return path;
+}
+
 /* ---------- public API ---------- */
 
-/* estimateLeg(a, b, opts) → {minutes, mode, live}
-   opts: { boat:bool, dayDate:Date|null, departMinutes:number } */
+/* estimateLeg(a, b, opts) → {minutes, mode, live, path}
+   opts: { boat:bool, dayDate:Date|null, departMinutes:number }
+   path is [[lat,lng],…] when a routed geometry is known, else null. */
 export function estimateLeg(a, b, opts = {}){
-  if(!a || !b || a.lat == null || b.lat == null) return { minutes: 0, mode: null, live: false };
+  if(!a || !b || a.lat == null || b.lat == null) return { minutes: 0, mode: null, live: false, path: null };
 
   const guess = heuristicLeg(a, b, opts);
 
@@ -240,32 +360,29 @@ export function estimateLeg(a, b, opts = {}){
   const profile = guess.mode === 'walk' ? 'walk' : 'transit';
   const key = legKey(a, b, profile);
   const hit = cache[key];
-  if(hit) return { minutes: hit.m, mode: hit.mode, live: true };
+  if(hit){
+    const sh = shapes[key];
+    return { minutes: hit.m, mode: hit.mode, live: true, path: sh ? sh.p : null };
+  }
 
   // Cache miss: return the guess now, fetch the real number in the background.
   if(profile === 'walk' && providerOk('valhalla')){
     enqueue(key, async () => {
-      const m = await fetchValhalla(a, b, 'pedestrian');
-      cache[key] = { m, mode:'walk', t: Date.now() };
-      cacheDirty = true;
-      notify();
+      const r = await fetchValhalla(a, b, 'pedestrian');
+      storeResult(key, r.minutes, 'walk', r.path);
     });
   } else if(profile === 'transit'){
     enqueue(key, async () => {
       if(providerOk('transitous')){
         try{
-          const m = await fetchTransitous(a, b, transitTime(opts.dayDate, opts.departMinutes ?? 600));
-          cache[key] = { m, mode:'transit', t: Date.now() };
-          cacheDirty = true;
-          notify();
+          const r = await fetchTransitous(a, b, transitTime(opts.dayDate, opts.departMinutes ?? 600));
+          storeResult(key, r.minutes, 'transit', r.path);
           return;
         } catch(e){ /* fall through to a driving estimate */ }
       }
       if(providerOk('valhalla')){
-        const m = await fetchValhalla(a, b, 'auto');
-        cache[key] = { m: m + 6, mode:'taxi', t: Date.now() };  // hail/park overhead
-        cacheDirty = true;
-        notify();
+        const r = await fetchValhalla(a, b, 'auto');
+        storeResult(key, r.minutes + 6, 'taxi', r.path);   // hail/park overhead
       } else {
         throw new Error('all providers down');
       }
@@ -285,6 +402,7 @@ export function knownMinutes(a, b, opts = {}){
 
 export function clearRouteCache(){
   cache = {};
+  shapes = {};
   cacheDirty = true;
   persistCache();
 }
