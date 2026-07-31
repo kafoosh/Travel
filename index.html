@@ -43,11 +43,11 @@
       <div class="daypanel-head">
         <h2>All Stops</h2>
         <div class="group-controls">
-          <label class="group-label">Split into
+          <label class="group-label">Plan as
             <input type="number" id="group-days" min="1" max="60" value="3"> days
           </label>
           <label class="group-label check"><input type="checkbox" id="group-include-optional"> include Optional ideas</label>
-          <button class="reset-btn" id="group-btn" title="Cluster all stops by proximity into that many days, respecting each day's time budget, then order each day">✨ Group by proximity</button>
+          <button class="reset-btn" id="group-btn" title="Group stops by proximity and what realistically fits each day, then preview the result before accepting">✨ Auto-plan</button>
         </div>
       </div>
       <div id="all-list" class="bin-list"></div>
@@ -194,6 +194,22 @@
   </div>
 </div>
 
+<!-- Auto-plan preview modal -->
+<div class="modal-overlay" id="auto-plan-overlay">
+  <div class="modal-box ap-box">
+    <button class="modal-close" id="auto-plan-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title">Auto-plan preview</h3>
+      <p class="ap-sub" id="ap-sub"></p>
+      <div id="ap-days" class="ap-days"></div>
+      <div class="modal-actions ap-actions">
+        <button class="reset-btn" id="ap-accept">✓ Accept this plan</button>
+        <button class="reset-btn" id="ap-cancel">Keep my current plan</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Search modal -->
 <div class="modal-overlay" id="search-overlay">
   <div class="modal-box search-box">
@@ -223,7 +239,7 @@
       </form>
       <div class="settings-tools">
         <h3 class="modal-subhead">Whole-trip tools</h3>
-        <button class="reset-btn" id="st-distribute" title="Reassign stops to days by geography and time budget, then order each day">✨ Distribute stops across days &amp; optimise</button>
+        <button class="reset-btn" id="st-distribute" title="Group stops by proximity and what realistically fits each day, with a preview before anything changes">✨ Auto-plan the trip…</button>
         <button class="reset-btn danger" id="st-clear">Start a new blank trip</button>
       </div>
     </div>

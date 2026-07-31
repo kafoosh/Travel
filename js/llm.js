@@ -2,12 +2,42 @@
    LLM PROMPT BUILDER
    Generates a copy-paste prompt that instructs any LLM to
    produce a trip in exactly the markdown format importText()
-   understands. The prompt embeds the format spec and a short
-   example, plus whatever the user has already decided (name,
-   day count, dates).
+   understands. Two modes:
+   - 'new':  plan a trip from scratch (embeds the format spec)
+   - 'edit': modify the CURRENT trip — embeds the full current
+     trip document so the LLM knows exactly what exists, and
+     instructs it to output the complete updated document
+     (which the user then imports, replacing the old plan).
    ========================================================= */
 
-export function buildPrompt(trip){
+import { serializeTrip } from './format.js';
+
+export function buildPrompt(trip, mode = 'new'){
+  if(mode === 'edit') return buildEditPrompt(trip);
+  return buildNewPrompt(trip);
+}
+
+function buildEditPrompt(trip){
+  return `You are a travel-planning assistant. I have an existing trip in a structured markdown format — the complete current plan is at the bottom of this message. I want you to EDIT it.
+
+First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.
+
+RULES
+=====
+- Output ONE complete markdown document in EXACTLY the same format as the current plan below — the ENTIRE updated trip, not a diff, not just the changed days. No commentary before or after the document, no code fences.
+- Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line.
+- New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
+- If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
+- Keep "## Optional" and "## Trip Info" sections present and updated to stay consistent with the changes (closures, reservations, and events should cover any newly added stops).
+- Travel between stops is computed automatically — durations are visit time only.
+- If asked for further revisions, output the complete document again in full.
+
+CURRENT TRIP DOCUMENT
+=====================
+${serializeTrip(trip)}`;
+}
+
+function buildNewPrompt(trip){
   const dayCount = trip.days.length;
   const hasName = trip.name && trip.name !== 'Untitled Trip';
   const asks = [];

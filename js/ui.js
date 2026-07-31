@@ -6,11 +6,11 @@
    escaped before it touches innerHTML.
    ========================================================= */
 
-import { esc, formatTime, formatDur, dayDate, formatDayDate, slugify, debounce } from './util.js';
+import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
 import { CATEGORIES, DEFAULT_DUR, THEMES, newDay, serializeTrip, importText, blankTrip } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId } from './state.js';
 import { computeSchedule, getHotel } from './schedule.js';
-import { optimizeDayOrder, distributeAcrossDays } from './optimize.js';
+import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt } from './llm.js';
@@ -44,6 +44,19 @@ let leafletMap = null;
 let mapFitPts = null;
 let mapFitPending = false;
 let modalStopId = null;
+let pendingFlash = null;   // {id, until} — highlight survives async re-renders
+
+function applyPendingFlash(){
+  if(!pendingFlash) return;
+  if(Date.now() > pendingFlash.until){ pendingFlash = null; return; }
+  const card = document.querySelector(`.stop-card[data-id="${CSS.escape(pendingFlash.id)}"]`);
+  if(!card) return;
+  card.classList.add('flash');
+  setTimeout(() => {
+    if(pendingFlash && Date.now() <= pendingFlash.until) return;   // a re-render will re-apply
+    document.querySelectorAll('.stop-card.flash').forEach(c => c.classList.remove('flash'));
+  }, Math.max(50, (pendingFlash.until - Date.now()) + 50));
+}
 
 const $ = id => document.getElementById(id);
 const trip = () => state.trip;
@@ -423,6 +436,7 @@ function renderScheduleList(day, sched){
     totals.innerHTML = parts.join(' · ') + ' <span class="est-note">· estimated from routes</span>';
     list.appendChild(totals);
   }
+  applyPendingFlash();
 }
 
 function parseTimeStr(str){
@@ -1070,13 +1084,11 @@ function runSearch(){
         state.currentDayIndex = trip().days.indexOf(loc.day);
         setView('days');
         renderAll();
+        pendingFlash = { id: s.id, until: Date.now() + 2600 };
         setTimeout(() => {
           const card = document.querySelector(`.stop-card[data-id="${CSS.escape(s.id)}"]`);
-          if(card){
-            card.scrollIntoView({ behavior:'smooth', block:'center' });
-            card.classList.add('flash');
-            setTimeout(() => card.classList.remove('flash'), 2400);
-          }
+          if(card) card.scrollIntoView({ behavior:'smooth', block:'center' });
+          applyPendingFlash();
         }, 120);
       } else if(loc.kind === 'optional'){
         setView('optional');
@@ -1172,32 +1184,120 @@ export function renderAllStops(){
   }
 }
 
-function groupByProximity(){
-  const t = trip();
-  const n = Math.max(1, Math.min(60, parseInt($('group-days').value, 10) || t.days.length));
-  const includeOptional = $('group-include-optional').checked;
-  const total = t.days.reduce((s, d) => s + d.order.length, 0) + (includeOptional ? t.optional.length : 0);
-  if(total < 2){ alert('Add some locations first — there’s nothing to group yet.'); return; }
-  if(!confirm('Regroup ' + total + ' stops by proximity into ' + n + ' day(s), respecting each day’s time budget, then order each day? Undo can revert it.')) return;
+/* ---------- Auto-plan: propose, preview, accept ---------- */
+let pendingPlan = null;
+const apMaps = [];
+
+function destroyApMaps(){
+  apMaps.forEach(m => { try{ m.remove(); }catch(e){} });
+  apMaps.length = 0;
+}
+
+function closeAutoPlan(){
+  destroyApMaps();
+  pendingPlan = null;
+  $('auto-plan-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function acceptAutoPlan(){
+  if(!pendingPlan) return;
+  const plan = pendingPlan;
   pushUndo();
-  if(includeOptional){
-    t.optional.forEach(o => t.days[0].order.push(o.id));
-    t.optional = [];
-  }
-  if(n > t.days.length){
-    while(t.days.length < n) t.days.push(newDay(t.days.length + 1));
-  } else if(n < t.days.length){
-    const removed = t.days.slice(n);
-    removed.forEach(d => t.days[n - 1].order.push(...d.order));
-    t.days = t.days.slice(0, n);
-  }
-  t.days.forEach((d, i) => { d.id = i + 1; });
-  const { orders } = distributeAcrossDays(t);
-  t.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
-  state.currentDayIndex = 0;
-  saveState();
+  closeAutoPlan();
+  replaceTrip(plan);
+  applyTheme();
   renderAll();
   renderAllStops();
+  setView('days');
+}
+
+function autoPlanPreview(){
+  const base = trip();
+  const n = Math.max(1, Math.min(60, parseInt($('group-days').value, 10) || base.days.length));
+  const includeOptional = $('group-include-optional') && $('group-include-optional').checked;
+  const total = base.days.reduce((s, d) => s + d.order.length, 0) + (includeOptional ? base.optional.length : 0);
+  if(total < 2){ alert('Add some locations first — there’s nothing to plan yet.'); return; }
+
+  // Plan on a clone: nothing touches the real trip until Accept.
+  const plan = JSON.parse(JSON.stringify(base));
+  if(includeOptional){
+    plan.optional.forEach(o => plan.days[0].order.push(o.id));
+    plan.optional = [];
+  }
+  if(n > plan.days.length){
+    while(plan.days.length < n) plan.days.push(newDay(plan.days.length + 1));
+  } else if(n < plan.days.length){
+    const removed = plan.days.slice(n);
+    removed.forEach(d => plan.days[n - 1].order.push(...d.order));
+    plan.days = plan.days.slice(0, n);
+  }
+  plan.days.forEach((d, i) => { d.id = i + 1; });
+  const { orders } = autoPlanOrders(plan);
+  plan.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
+  pendingPlan = plan;
+  renderAutoPlanPreview(plan);
+}
+
+function renderAutoPlanPreview(plan){
+  destroyApMaps();
+  const wrap = $('ap-days');
+  wrap.innerHTML = '';
+  $('ap-sub').textContent = 'Stops grouped by proximity and what realistically fits each day (visit lengths + travel + hotel legs). Check each day below — nothing changes until you accept.';
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C1502E';
+
+  const scheds = plan.days.map(d => computeSchedule(plan, d));
+  plan.days.forEach((day, i) => {
+    const sched = scheds[i];
+    const over = sched.rows.length && sched.returnTime > 22 * 60 + 30;
+    const el = document.createElement('div');
+    el.className = 'ap-day';
+    el.innerHTML = `
+      <div class="ap-head">
+        <b>Day ${day.id}</b> · ${day.order.length} stop${day.order.length === 1 ? '' : 's'}
+        ${sched.rows.length ? ' · ' + formatTime(parseTime(day.start)) + ' – ' + formatTime(sched.returnTime) : ''}
+        ${sched.walkKm > 0.05 ? ' · 🚶 ' + sched.walkKm.toFixed(1) + ' km' : ''}
+        ${over ? ' <span class="late-chip">⚠ runs late — consider more days</span>' : ''}
+      </div>
+      <div class="ap-map" id="ap-map-${i}"></div>
+      <ol class="ap-list">${sched.rows.map(r => `<li>${formatTime(r.start)} — ${esc(r.stop.name)}</li>`).join('') || '<li class="ap-empty">Empty day</li>'}</ol>`;
+    wrap.appendChild(el);
+  });
+
+  $('auto-plan-overlay').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  // Mini-maps need their containers laid out before Leaflet can size them.
+  setTimeout(() => {
+    if(typeof L === 'undefined') return;
+    plan.days.forEach((day, i) => {
+      const elId = 'ap-map-' + i;
+      if(!document.getElementById(elId)) return;
+      const m = L.map(elId, { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
+      const pts = [];
+      let num = 0;
+      scheds[i].rows.forEach(r => {
+        const s = r.stop;
+        if(s.lat == null) return;
+        num += 1;
+        L.marker([s.lat, s.lng], { icon: L.divIcon({
+          className: '', html: '<div class="map-pin ap-pin"><span>' + num + '</span></div>',
+          iconSize: [20, 20], iconAnchor: [10, 18]
+        })}).addTo(m);
+        pts.push([s.lat, s.lng]);
+      });
+      if(scheds[i].hotel && scheds[i].hotel.lat != null && pts.length){
+        pts.push([scheds[i].hotel.lat, scheds[i].hotel.lng]);
+      }
+      if(pts.length > 1){
+        L.polyline(pts, { color: accent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
+        m.fitBounds(pts, { padding: [14, 14], maxZoom: 15 });
+      } else if(pts.length === 1) m.setView(pts[0], 14);
+      else m.setView([30, 10], 1);
+      apMaps.push(m);
+    });
+  }, 90);
 }
 
 /* =========================================================
@@ -1228,7 +1328,11 @@ export function renderInfo(){
       </div>`).join('')}
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Plan with an AI assistant</h3>
-      <p>Copy this prompt into any AI assistant (Claude, ChatGPT…). It asks the right questions, then produces a complete trip — locations, coordinates, descriptions, restaurant picks, closures, reservations — in exactly the format this site imports.</p>
+      <p>Copy this prompt into any AI assistant (Claude, ChatGPT…). It asks the right questions, then produces a trip in exactly the format this site imports — locations with coordinates, descriptions, restaurant picks, closures, reservations.</p>
+      <div class="prompt-mode" id="prompt-mode">
+        <label><input type="radio" name="prompt-mode" value="new"> Plan a new trip from scratch</label>
+        <label><input type="radio" name="prompt-mode" value="edit"> Edit this trip — the prompt includes the current plan so the AI knows exactly what exists, and returns the full updated trip to import back</label>
+      </div>
       <textarea class="prompt-area" id="llm-prompt" readonly></textarea>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="copy-prompt">Copy prompt</button>
@@ -1236,12 +1340,12 @@ export function renderInfo(){
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Import &amp; export</h3>
-      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. Import accepts that same format — hand-written, exported here, or produced by an AI using the prompt above — or a simple CSV of locations. Importing replaces the current trip (Undo works).</p>
+      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="export-btn">⬇ Export trip (.md)</button>
         <button class="reset-btn" id="import-file-btn">⬆ Import file (.md / .txt / .csv)</button>
         <input type="file" id="import-file" accept=".md,.txt,.csv,text/plain,text/markdown,text/csv" class="hidden">
-        <button class="reset-btn" id="demo-btn">Load example trip (Rome &amp; Venice)</button>
+        <button class="reset-btn hidden" id="demo-btn">Load example trip (Rome &amp; Venice)</button>
       </div>
       <p style="margin:12px 0 4px;">…or paste a trip here:</p>
       <textarea class="import-area" id="import-paste" placeholder="# Trip: My Trip&#10;&#10;## Day 1: …"></textarea>
@@ -1249,6 +1353,10 @@ export function renderInfo(){
         <button class="reset-btn" id="import-paste-btn">Import pasted text</button>
       </div>
       <p class="import-warnings" id="import-warnings"></p>
+      <p class="example-files">Example files (a real 10-day Rome &amp; Venice trip):
+        <a href="demo/rome-venice-trip.md" download>rome-venice-trip.md</a> ·
+        <a href="demo/rome-venice-trip.txt" download>.txt</a> ·
+        <a href="demo/rome-venice-trip.csv" download>.csv (locations only)</a></p>
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Share &amp; sync across devices</h3>
@@ -1267,7 +1375,7 @@ export function renderInfo(){
     </div>
     <div class="infocard">
       <h3>How to use this site</h3>
-      <p>Reorder a day by dragging a stop card with its ⠿ handle — dragging anywhere else selects text. Keyboard: focus the handle and press ↑/↓. Click a card for details and notes. "Move to…" reassigns a stop; 🗑 sends it to the Bin. "✨ Optimize route" reorders a day to minimise travel; "Distribute stops across days" (in ⚙ Settings) rebalances the whole trip. Travel times marked "est" are distance-based guesses that upgrade automatically to real routed times.</p>
+      <p>Reorder a day by dragging a stop card with its ⠿ handle — dragging anywhere else selects text. Keyboard: focus the handle and press ↑/↓. Click a card for details and notes; 🔍 (or /) searches everything. "Move to…" reassigns a stop; 🗑 sends it to the Bin. "✨ Optimize route" reorders one day; "✨ Auto-plan" (All Stops tab) regroups the whole trip by proximity and daily feasibility, with a preview to accept or reject. Travel times marked "est" are distance-based guesses that upgrade automatically to real routed times.</p>
     </div>
   `;
 
@@ -1300,8 +1408,17 @@ export function renderInfo(){
     }, 600));
   });
 
-  // LLM prompt
-  $('llm-prompt').value = buildPrompt(t);
+  // LLM prompt — default to 'edit' once the trip actually has content
+  const defaultMode = Object.keys(t.stops).length ? 'edit' : 'new';
+  const refreshPrompt = () => {
+    const mode = (el.querySelector('input[name="prompt-mode"]:checked') || {}).value || 'new';
+    $('llm-prompt').value = buildPrompt(trip(), mode);
+  };
+  el.querySelectorAll('input[name="prompt-mode"]').forEach(r => {
+    r.checked = r.value === defaultMode;
+    r.addEventListener('change', refreshPrompt);
+  });
+  refreshPrompt();
   $('copy-prompt').addEventListener('click', () => copyText($('llm-prompt').value, $('copy-prompt'), 'Copy prompt'));
 
   // import / export
@@ -1473,20 +1590,6 @@ function submitSettings(e){
   renderInfo();
 }
 
-function distribute(){
-  const t = trip();
-  const total = t.days.reduce((n, d) => n + d.order.length, 0);
-  if(total < 2){ alert('Add some locations first — there’s nothing to distribute yet.'); return; }
-  if(!confirm('Reassign stops across all ' + t.days.length + ' days by geography and time budget, then optimise each day’s order? Undo can revert it.')) return;
-  pushUndo();
-  const { orders, moved } = distributeAcrossDays(t);
-  t.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
-  saveState();
-  closeSettings();
-  renderAll();
-  if(moved === 0) setTimeout(() => alert('Days were already well balanced — each day’s order was optimised.'), 50);
-}
-
 function clearTrip(){
   if(!confirm('Start a new blank trip? The current one is replaced (Undo can bring it back, and Export first if you want a file copy).')) return;
   pushUndo();
@@ -1546,20 +1649,36 @@ export function renderAll(){
   if(state.currentView === 'optional') renderOptional();
 }
 
+/* Null-safe wiring: on a no-build site, a stale-cached index.html can lag the
+   JS (or vice versa) by one deploy. One missing element must skip its own
+   handler, not throw and kill every handler wired after it. */
+function on(id, evt, fn){
+  const el = $(id);
+  if(el) el.addEventListener(evt, fn);
+  else console.warn('wire: #' + id + ' missing (stale cached page?) — hard-refresh to fix');
+}
+function ac(id, onPick, onStatus){
+  if($(id)) attachAutocomplete($(id), onPick, onStatus);
+}
+
 export function wireStaticHandlers(){
-  $('btn-view-days').addEventListener('click', () => setView('days'));
-  $('btn-view-all').addEventListener('click', () => setView('all'));
-  $('btn-view-bin').addEventListener('click', () => setView('bin'));
-  $('btn-view-optional').addEventListener('click', () => setView('optional'));
-  $('btn-view-info').addEventListener('click', () => setView('info'));
-  $('group-btn').addEventListener('click', groupByProximity);
-  $('add-optional-btn').addEventListener('click', () => openLocationForm(null, 'optional'));
+  on('btn-view-days', 'click', () => setView('days'));
+  on('btn-view-all', 'click', () => setView('all'));
+  on('btn-view-bin', 'click', () => setView('bin'));
+  on('btn-view-optional', 'click', () => setView('optional'));
+  on('btn-view-info', 'click', () => setView('info'));
+  on('group-btn', 'click', autoPlanPreview);
+  on('auto-plan-close', 'click', closeAutoPlan);
+  on('ap-cancel', 'click', closeAutoPlan);
+  on('ap-accept', 'click', acceptAutoPlan);
+  on('auto-plan-overlay', 'click', (e) => { if(e.target.id === 'auto-plan-overlay') closeAutoPlan(); });
+  on('add-optional-btn', 'click', () => openLocationForm(null, 'optional'));
 
   // search
-  $('btn-search').addEventListener('click', openSearch);
-  $('search-close').addEventListener('click', closeSearch);
-  $('search-overlay').addEventListener('click', (e) => { if(e.target.id === 'search-overlay') closeSearch(); });
-  $('search-input').addEventListener('input', debounce(runSearch, 150));
+  on('btn-search', 'click', openSearch);
+  on('search-close', 'click', closeSearch);
+  on('search-overlay', 'click', (e) => { if(e.target.id === 'search-overlay') closeSearch(); });
+  on('search-input', 'input', debounce(runSearch, 150));
   document.addEventListener('keydown', (e) => {
     if(e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (document.activeElement && document.activeElement.tagName) || '';
@@ -1567,13 +1686,13 @@ export function wireStaticHandlers(){
     e.preventDefault();
     openSearch();
   });
-  $('al-cat').addEventListener('change', refreshHikeFields);
-  $('al-lat').addEventListener('input', refreshCoordsStatus);
-  $('al-lng').addEventListener('input', refreshCoordsStatus);
-  $('btn-settings').addEventListener('click', openSettings);
-  $('trip-title').addEventListener('click', openSettings);
-  $('cloud-chip').addEventListener('click', () => setView('info'));
-  $('undo-btn').addEventListener('click', () => {
+  on('al-cat', 'change', refreshHikeFields);
+  on('al-lat', 'input', refreshCoordsStatus);
+  on('al-lng', 'input', refreshCoordsStatus);
+  on('btn-settings', 'click', openSettings);
+  on('trip-title', 'click', openSettings);
+  on('cloud-chip', 'click', () => setView('info'));
+  on('undo-btn', 'click', () => {
     if(popUndo()){
       applyTheme();
       renderAll();
@@ -1582,15 +1701,15 @@ export function wireStaticHandlers(){
   });
 
   // detail modal
-  $('modal-close').addEventListener('click', closeModal);
-  $('modal-overlay').addEventListener('click', (e) => { if(e.target.id === 'modal-overlay') closeModal(); });
-  $('modal-notes').addEventListener('input', saveNotesDebounced);
-  $('modal-edit').addEventListener('click', () => {
+  on('modal-close', 'click', closeModal);
+  on('modal-overlay', 'click', (e) => { if(e.target.id === 'modal-overlay') closeModal(); });
+  on('modal-notes', 'input', saveNotesDebounced);
+  on('modal-edit', 'click', () => {
     const id = modalStopId;
     closeModal();
     if(id) openLocationForm(id);
   });
-  $('modal-bin').addEventListener('click', () => {
+  on('modal-bin', 'click', () => {
     const id = modalStopId;
     closeModal();
     if(!id) return;
@@ -1599,36 +1718,38 @@ export function wireStaticHandlers(){
   });
 
   // add/edit location
-  $('add-location-close').addEventListener('click', closeLocationForm);
-  $('add-location-overlay').addEventListener('click', (e) => { if(e.target.id === 'add-location-overlay') closeLocationForm(); });
-  $('add-location-form').addEventListener('submit', submitLocationForm);
+  on('add-location-close', 'click', closeLocationForm);
+  on('add-location-overlay', 'click', (e) => { if(e.target.id === 'add-location-overlay') closeLocationForm(); });
+  on('add-location-form', 'submit', submitLocationForm);
 
   // day edit
-  $('day-edit-close').addEventListener('click', closeDayEdit);
-  $('day-edit-overlay').addEventListener('click', (e) => { if(e.target.id === 'day-edit-overlay') closeDayEdit(); });
-  $('day-edit-form').addEventListener('submit', submitDayEdit);
-  $('de-delete').addEventListener('click', deleteDay);
+  on('day-edit-close', 'click', closeDayEdit);
+  on('day-edit-overlay', 'click', (e) => { if(e.target.id === 'day-edit-overlay') closeDayEdit(); });
+  on('day-edit-form', 'submit', submitDayEdit);
+  on('de-delete', 'click', deleteDay);
 
   // hotel edit
-  $('hotel-edit-close').addEventListener('click', closeHotelEdit);
-  $('hotel-edit-overlay').addEventListener('click', (e) => { if(e.target.id === 'hotel-edit-overlay') closeHotelEdit(); });
-  $('hotel-edit-form').addEventListener('submit', submitHotelEdit);
+  on('hotel-edit-close', 'click', closeHotelEdit);
+  on('hotel-edit-overlay', 'click', (e) => { if(e.target.id === 'hotel-edit-overlay') closeHotelEdit(); });
+  on('hotel-edit-form', 'submit', submitHotelEdit);
 
   // settings
-  $('settings-close').addEventListener('click', closeSettings);
-  $('settings-overlay').addEventListener('click', (e) => { if(e.target.id === 'settings-overlay') closeSettings(); });
-  $('settings-form').addEventListener('submit', submitSettings);
-  $('st-distribute').addEventListener('click', distribute);
-  $('st-clear').addEventListener('click', clearTrip);
+  on('settings-close', 'click', closeSettings);
+  on('settings-overlay', 'click', (e) => { if(e.target.id === 'settings-overlay') closeSettings(); });
+  on('settings-form', 'submit', submitSettings);
+  on('st-distribute', 'click', () => { closeSettings(); setView('all'); autoPlanPreview(); });
+  on('st-clear', 'click', clearTrip);
 
   // escape closes whichever overlay is open
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape') return;
-    for(const id of ['search-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
-      if($(id).classList.contains('open')){
+    for(const id of ['search-overlay','auto-plan-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
+      const ov = $(id);
+      if(ov && ov.classList.contains('open')){
         if(id === 'modal-overlay') closeModal();
         else if(id === 'search-overlay') closeSearch();
-        else { $(id).classList.remove('open'); document.body.style.overflow = ''; }
+        else if(id === 'auto-plan-overlay') closeAutoPlan();
+        else { ov.classList.remove('open'); document.body.style.overflow = ''; }
         return;
       }
     }
@@ -1636,7 +1757,7 @@ export function wireStaticHandlers(){
 
   // place search: typing a name suggests real places and fills coordinates.
   // Coordinates stay hidden unless search fails (or the user asks for them).
-  attachAutocomplete($('al-name'), (r) => {
+  ac('al-name', (r) => {
     $('al-name').value = r.name;
     $('al-lat').value = r.lat;
     $('al-lng').value = r.lng;
@@ -1648,12 +1769,12 @@ export function wireStaticHandlers(){
       $('al-coords-wrap').classList.remove('hidden');
     }
   });
-  attachAutocomplete($('al-end-search'), (r) => {
+  ac('al-end-search', (r) => {
     $('al-end-search').value = r.name;
     $('al-endlat').value = r.lat;
     $('al-endlng').value = r.lng;
   });
-  attachAutocomplete($('he-name'), (r) => {
+  ac('he-name', (r) => {
     $('he-name').value = r.name;
     $('he-lat').value = r.lat;
     $('he-lng').value = r.lng;

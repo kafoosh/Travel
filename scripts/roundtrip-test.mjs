@@ -10,7 +10,7 @@ globalThis.localStorage = {
 };
 
 const { parseTrip, serializeTrip, parseCsv, importText, blankTrip } = await import('../js/format.js');
-const { optimizeDayOrder, distributeAcrossDays } = await import('../js/optimize.js');
+const { optimizeDayOrder, autoPlanOrders } = await import('../js/optimize.js');
 const { readFileSync } = await import('node:fs');
 const { dirname, join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
@@ -94,12 +94,34 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
   const before = pathMinutes(shuffled), after = pathMinutes(opt);
   check('optimised path is no longer than the shuffled one', after <= before, after + ' vs ' + before + ' min');
 
-  const { orders, moved } = distributeAcrossDays(trip);
+  const { orders } = autoPlanOrders(trip);
   const allBefore = trip.days.flatMap(d => d.order).sort().join();
   const allAfter = Object.values(orders).flat().sort().join();
-  check('distribute preserves every stop exactly once', allBefore === allAfter);
-  check('distribute produced an order per day', trip.days.every(d => Array.isArray(orders[d.id])));
-  console.log('  (distribute moved ' + moved + ' stops between days)');
+  check('auto-plan preserves every stop exactly once', allBefore === allAfter);
+  check('auto-plan produced an order per day', trip.days.every(d => Array.isArray(orders[d.id])));
+
+  // Quality checks on the pristine demo trip (the mutated one above contains
+  // a deliberately-remote Amalfi hike that must overflow SOMEWHERE).
+  const fresh = parseTrip(md).trip;
+  const { orders: fo } = autoPlanOrders(fresh);
+  let crossCity = 0, anchorMoved = 0;
+  const anchorDayBefore = {};
+  fresh.days.forEach(d => d.order.forEach(id => {
+    const s = fresh.stops[id];
+    if(s && ['travel','boat','hotel','flight'].includes(s.cat)) anchorDayBefore[id] = d.id;
+  }));
+  const loads = fresh.days.map(d => {
+    const cities = new Set(fo[d.id].map(id => fresh.stops[id]).filter(s => s && s.lat != null).map(s => s.lat > 44 ? 'V' : 'R'));
+    if(cities.size > 1) crossCity++;
+    fo[d.id].forEach(id => { if(anchorDayBefore[id] && anchorDayBefore[id] !== d.id) anchorMoved++; });
+    return fo[d.id].reduce((n, id) => n + ((fresh.stops[id] || {}).dur || 0), 0);
+  });
+  check('auto-plan never mixes cities within a day', crossCity === 0, crossCity + ' mixed days');
+  check('anchored stops stay on their day', anchorMoved === 0, String(anchorMoved));
+  check('no day overloaded (visits ≤ 11h)', Math.max(...loads) <= 11 * 60, Math.max(...loads) + ' min');
+  check('no day starved (every day gets stops)', Math.min(...loads) >= 60, Math.min(...loads) + ' min');
+  check('loads reasonably balanced (max ≤ 2× min)', Math.max(...loads) <= 2 * Math.min(...loads),
+    Math.min(...loads) + '–' + Math.max(...loads) + ' min');
 
   console.log(failures ? '\n' + failures + ' FAILURE(S)' : '\nall checks passed');
   process.exit(failures ? 1 : 0);
