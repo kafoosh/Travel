@@ -21,7 +21,7 @@
   <div class="toplinks">
     <button id="btn-view-days" class="active">Day by Day</button>
     <button id="btn-view-all">All Stops</button>
-    <button id="btn-view-optional">Optional</button>
+    <button id="btn-view-optional">Unassigned</button>
     <button id="btn-view-bin">Bin</button>
     <button id="btn-view-info">Trip Info</button>
     <button id="btn-search" title="Search the itinerary (press /)">🔍 Search</button>
@@ -47,7 +47,7 @@
           <label class="group-label">Plan as
             <input type="number" id="group-days" min="1" max="60" value="3"> days
           </label>
-          <label class="group-label check"><input type="checkbox" id="group-include-optional"> include Optional ideas</label>
+          <label class="group-label check"><input type="checkbox" id="group-include-optional"> include Unassigned</label>
           <button class="reset-btn" id="group-btn" title="Group stops by proximity and what realistically fits each day, then preview the result before accepting">✨ Auto-plan</button>
           <button class="reset-btn" id="all-add-btn">+ Add location</button>
         </div>
@@ -59,9 +59,9 @@
   <section id="view-optional" class="hidden">
     <div class="daypanel viewpanel">
       <div class="daypanel-head">
-        <h2>Optional</h2>
-        <span class="head-hint">Ideas not on any day yet — add them where they fit</span>
-        <button class="reset-btn" id="add-optional-btn">+ Add to Optional</button>
+        <h2>Unassigned</h2>
+        <span class="head-hint">Stops with no day yet — drag or add them where they fit</span>
+        <button class="reset-btn" id="add-optional-btn">+ Add unassigned stop</button>
       </div>
       <div id="optional-list" class="bin-list"></div>
     </div>

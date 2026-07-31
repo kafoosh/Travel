@@ -71,7 +71,7 @@ RULES
 - Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line.
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
-- Keep "## Optional" and "## Trip Info" sections present and updated to stay consistent with the changes (closures, reservations, and events should cover any newly added stops).
+- Keep "## Unassigned" and "## Trip Info" sections present and updated to stay consistent with the changes (closures, reservations, and events should cover any newly added stops).
 - Travel between stops is computed automatically — durations are visit time only.
 - If asked for further revisions, output the complete document again in full.
 
@@ -140,14 +140,14 @@ Arrival/departure days: model the flight or train as its own stop — category "
 
 (Repeat "## Day N: …" for every day. Include meals as category "food" stops with real restaurant recommendations. 4–8 stops per day is a realistic pace; do not overpack. Order each day's stops geographically so the day flows without backtracking.)
 
-## Optional
+## Unassigned
 
 ### <location name>
 - <same fields as any location>
 - suggested day: <day number it fits best>
 - suggestion note: <one sentence on why/when to add it>
 
-(3–8 interesting niche spots that didn't make the main plan.)
+(3–8 interesting niche spots that didn't make the main plan — worth seeing, but not slotted into a day.)
 
 ## Trip Info
 

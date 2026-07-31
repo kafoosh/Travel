@@ -155,6 +155,7 @@ function renderDayPanel(){
       </div>
     </div>
     ${hotelBarHtml}
+    <div id="day-unassigned"></div>
     <div class="view-switch" role="group" aria-label="Switch between schedule and map">
       <button id="switch-list" class="active" aria-pressed="true">☰ Schedule</button>
       <button id="switch-map" aria-pressed="false">🗺 Map</button>
@@ -220,6 +221,7 @@ function renderDayPanel(){
     });
   });
 
+  renderUnassignedTray($('day-unassigned'), day.id);
   renderScheduleList(day, sched);
   renderMap(day, sched);
 }
@@ -274,10 +276,25 @@ function renderScheduleList(day, sched){
   const list = $('schedule-list');
   list.innerHTML = '';
 
+  // Dropping on the list background (not a card) appends to this day —
+  // the only way to place the first stop of an empty day by dragging.
+  list.ondragover = (e) => {
+    if(e.target.closest('.stop-card')) return;
+    e.preventDefault();
+    list.classList.add('drop-into');
+  };
+  list.ondragleave = () => list.classList.remove('drop-into');
+  list.ondrop = (e) => {
+    list.classList.remove('drop-into');
+    if(e.target.closest('.stop-card')) return;   // the card's own handler placed it
+    e.preventDefault();
+    reorder(day, e.dataTransfer.getData('text/plain'), null, false);
+  };
+
   if(rows.length === 0){
     const hint = document.createElement('p');
     hint.style.cssText = 'color:var(--ink-soft); font-size:14px; padding:8px 4px; line-height:1.5;';
-    hint.innerHTML = 'Nothing planned for this day yet.<br>Use <b>+ Add location</b> above, pull something in from the <b>Optional</b> tab, or import a whole trip from <b>Trip Info → Import</b>.';
+    hint.innerHTML = 'Nothing planned for this day yet.<br>Use <b>+ Add location</b> above, pull something in from <b>Unassigned</b>, or import a whole trip from <b>Trip Info → Import</b>.';
     list.appendChild(hint);
     return;
   }
@@ -320,7 +337,7 @@ function renderScheduleList(day, sched){
 
     const dayOptionsHtml = trip().days.filter(d => d.id !== day.id)
       .map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('') +
-      `<option value="optional">→ Optional</option>`;
+      `<option value="optional">→ Unassigned</option>`;
 
     card.innerHTML = `
       ${numberBadgeHtml}
@@ -500,6 +517,68 @@ function parseTimeStr(str){
 
 function shortTitle(t){ return t.length > 18 ? t.slice(0, 17) + '…' : t; }
 
+/* Collapsible tray of unassigned stops. Chips are draggable onto a day's
+   schedule (or, in All Stops, onto a day heading). Clicking a chip adds it
+   straight to `dayId`; without one (All Stops) it opens a small day picker,
+   so the tray works on touch devices too. */
+function renderUnassignedTray(host, dayId){
+  const items = trip().optional;
+  if(!items.length) return;
+  const box = document.createElement('details');
+  box.className = 'unassigned-tray';
+  const sum = document.createElement('summary');
+  sum.innerHTML = 'Unassigned <span class="ut-count">' + items.length + '</span> ' +
+    '<span class="ut-hint">' + (dayId ? 'click to add to this day, or drag onto the schedule' : 'drag onto a day, or click to choose one') + '</span>';
+  box.appendChild(sum);
+
+  const row = document.createElement('div');
+  row.className = 'ut-chips';
+  items.forEach(o => {
+    const s = trip().stops[o.id];
+    if(!s) return;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'ut-chip';
+    chip.draggable = true;
+    chip.dataset.id = o.id;
+    chip.innerHTML = (ICONS[s.cat] || '📍') + ' ' + esc(s.name) +
+      (o.day ? ' <span class="ut-sug">D' + o.day + '?</span>' : '');
+    chip.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', o.id);
+      e.dataTransfer.effectAllowed = 'move';
+      chip.classList.add('dragging');
+    });
+    chip.addEventListener('dragend', () => chip.classList.remove('dragging'));
+    chip.addEventListener('click', (e) => {
+      e.preventDefault();
+      if(dayId){ moveToDay(null, o.id, dayId); return; }
+      const open = chip.querySelector('.ut-menu');
+      document.querySelectorAll('.ut-menu').forEach(m => m.remove());
+      if(open) return;
+      const menu = document.createElement('span');
+      menu.className = 'ut-menu';
+      trip().days.forEach(d => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'mode-opt';
+        b.textContent = 'D' + d.id;
+        b.title = d.title;
+        b.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          moveToDay(null, o.id, d.id);
+          renderAllStops();
+        });
+        menu.appendChild(b);
+      });
+      chip.appendChild(menu);
+      setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 0);
+    });
+    row.appendChild(chip);
+  });
+  box.appendChild(row);
+  host.appendChild(box);
+}
+
 /* ---------- reorder / move / bin ---------- */
 
 function moveStop(day, id, delta){
@@ -514,15 +593,26 @@ function moveStop(day, id, delta){
   updateUndoButton();
 }
 
+/* Reorder within a day, or place a stop dragged in from the Unassigned tray
+   (or another day) at that position. targetId null appends to the end. */
 function reorder(day, draggedId, targetId, before){
-  if(draggedId === targetId) return;
-  const order = day.order;
-  const fromIdx = order.indexOf(draggedId);
-  if(fromIdx === -1) return;
+  if(!draggedId || draggedId === targetId || !trip().stops[draggedId]) return;
+  const fromIdx = day.order.indexOf(draggedId);
   pushUndo();
-  order.splice(fromIdx, 1);
-  let toIdx = order.indexOf(targetId);
-  if(!before) toIdx += 1;
+  if(fromIdx === -1){
+    // arriving from outside this day — detach from wherever it was
+    trip().days.forEach(d => { d.order = d.order.filter(x => x !== draggedId); });
+    trip().optional = trip().optional.filter(o => o.id !== draggedId);
+    trip().bin = trip().bin.filter(x => x !== draggedId);
+  } else {
+    day.order.splice(fromIdx, 1);
+  }
+  // Read AFTER the detach: filtering above replaces each day's order array,
+  // so a reference captured earlier would point at a detached copy.
+  const order = day.order;
+  let toIdx = targetId ? order.indexOf(targetId) : order.length;
+  if(toIdx === -1) toIdx = order.length;
+  else if(targetId && !before) toIdx += 1;
   order.splice(toIdx, 0, draggedId);
   saveState();
   renderDayPanel();
@@ -571,7 +661,7 @@ function fitMapToDay(){
   if(!leafletMap || !mapFitPts || mapFitPts.length < 2) return false;
   const size = leafletMap.getSize();
   if(size.x < 40 || size.y < 40){ mapFitPending = true; return false; }
-  leafletMap.fitBounds(mapFitPts, { padding:[30,30], maxZoom:16 });
+  leafletMap.fitBounds(mapFitPts, { padding:[30,30], maxZoom:16, animate:false });
   mapFitPending = false;
   return true;
 }
@@ -589,7 +679,7 @@ function renderMap(day, sched){
   // stomps the user's pan/zoom.
   const sameContainer = leafletMap && leafletMap.getContainer() === mapEl;
   if(!sameContainer){
-    if(leafletMap){ try{ leafletMap.remove(); }catch(e){} }
+    if(leafletMap){ try{ leafletMap.stop(); leafletMap.remove(); }catch(e){} }
     leafletMap = L.map('map', { scrollWheelZoom: false });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -684,12 +774,12 @@ function renderMap(day, sched){
   if(!dayChanged) return;              // same day refreshed: keep the user's pan/zoom
   if(boundPts.length > 1){
     if(!fitMapToDay()){
-      leafletMap.setView(L.latLngBounds(boundPts).getCenter(), 13);
+      leafletMap.setView(L.latLngBounds(boundPts).getCenter(), 13, { animate:false });
     }
   } else if(boundPts.length === 1){
-    leafletMap.setView(boundPts[0], 15);
+    leafletMap.setView(boundPts[0], 15, { animate:false });
   } else {
-    leafletMap.setView([30, 10], 2);   // blank trip: whole-world view
+    leafletMap.setView([30, 10], 2, { animate:false });   // blank trip: whole-world view
   }
 }
 
@@ -761,7 +851,7 @@ function closeModal(){
 function fillDaySelect(sel, selectedValue){
   sel.innerHTML = trip().days.map(d =>
     `<option value="${d.id}">D${d.id} — ${esc(d.title)}</option>`).join('') +
-    `<option value="optional">Optional (no day yet)</option>`;
+    `<option value="optional">Unassigned (no day yet)</option>`;
   sel.value = selectedValue;
   if(!sel.value) sel.value = String(trip().days[0].id);
 }
@@ -1008,7 +1098,7 @@ function renderOptional(){
   if(!el) return;
   el.innerHTML = '';
   if(!trip().optional.length){
-    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">No optional ideas yet. Use "Move to… → Optional" on any stop, choose "Optional" when adding a location, or include an "## Optional" section in an imported trip.</p>`;
+    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing unassigned. Use "Move to… → Unassigned" on any stop, choose "Unassigned" when adding a location, or include an "## Unassigned" section in an imported trip.</p>`;
     return;
   }
   trip().optional.forEach(o => {
@@ -1150,7 +1240,7 @@ function runSearch(){
     if(loc.kind === 'day'){
       whereHtml = `<span class="sr-where">D${loc.day.id} · ${esc(shortTitle(loc.day.title))}${loc.time != null ? ' · ' + formatTime(loc.time) : ''}</span>`;
     } else if(loc.kind === 'optional'){
-      whereHtml = `<span class="sr-where">Optional${loc.optMeta.day ? ' · suggested D' + loc.optMeta.day : ''}</span>`;
+      whereHtml = `<span class="sr-where">Unassigned${loc.optMeta.day ? ' · suggested D' + loc.optMeta.day : ''}</span>`;
     } else if(loc.kind === 'bin'){
       whereHtml = `<span class="sr-where">Bin</span>`;
     }
@@ -1210,7 +1300,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
     <div class="manage-row">
       ${isOptional
         ? `<select class="restore-to-day">${dayOptions}</select><button class="restore-btn">+ Add</button>`
-        : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Optional</option></select>
+        : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Unassigned</option></select>
            <button class="bin-btn" title="Remove to bin">🗑</button>`}
       <span class="drag-handle" title="Drag to another day or position" role="button" tabindex="0">⠿</span>
     </div>`;
@@ -1299,6 +1389,7 @@ export function renderAllStops(){
   if(!el) return;
   el.innerHTML = '';
   const t = trip();
+  renderUnassignedTray(el, null);
   if(!$('group-days').value || document.activeElement !== $('group-days')){
     $('group-days').value = t.days.length;
   }
@@ -1324,7 +1415,7 @@ export function renderAllStops(){
   if(t.optional.length){
     const head = document.createElement('div');
     head.className = 'all-day-head';
-    head.textContent = 'Optional ideas (' + t.optional.length + ')';
+    head.textContent = 'Unassigned (' + t.optional.length + ')';
     wireHeadDrop(head, { type:'optional' });
     el.appendChild(head);
     t.optional.forEach(o => {
@@ -1537,7 +1628,7 @@ export function renderInfo(){
     </div>
     <div class="infocard">
       <h3>How to use this site</h3>
-      <p>Reorder a day by dragging a stop card with its ⠿ handle — dragging anywhere else selects text. Keyboard: focus the handle and press ↑/↓. Click a card for details and notes; 🔍 (or /) searches everything. "Move to…" reassigns a stop; 🗑 sends it to the Bin. "✨ Optimize route" reorders one day; "✨ Auto-plan" (All Stops tab) regroups the whole trip by proximity and daily feasibility, with a preview to accept or reject. Travel times marked "est" are distance-based guesses that upgrade automatically to real routed times.</p>
+      <p>Unassigned stops (no day yet) sit in their own tab and in the "Unassigned" tray on each day — drag one onto the schedule to place it, or click it to add it to that day. Reorder a day by dragging a stop card with its ⠿ handle — dragging anywhere else selects text. Keyboard: focus the handle and press ↑/↓. Click a card for details and notes; 🔍 (or /) searches everything. "Move to…" reassigns a stop; 🗑 sends it to the Bin. "✨ Optimize route" reorders one day; "✨ Auto-plan" (All Stops tab) regroups the whole trip by proximity and daily feasibility, with a preview to accept or reject. Travel times marked "est" are distance-based guesses that upgrade automatically to real routed times.</p>
     </div>
   `;
 

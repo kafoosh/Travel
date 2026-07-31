@@ -661,7 +661,7 @@
 - image: https://commons.wikimedia.org/wiki/Special:FilePath/Venice_canals_sunset.JPG?width=1200
 - description: Last night in Venice — a canal-side spot of your choice.
 
-## Optional
+## Unassigned
 
 ### Centrale Montemartini
 - lat: 41.859

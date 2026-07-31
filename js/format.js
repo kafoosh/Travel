@@ -33,7 +33,10 @@ export function blankTrip(){
     hotels:[],               // {id, name, lat, lng, mode:'walk'|'boat', img, desc}
     days:[newDay(1), newDay(2), newDay(3)],
     stops:{},                // id -> {id,name,cat,dur,lat,lng,img,desc,detail,notes,tags:[]}
-    optional:[],             // {id, day, note} — suggestions not on any day yet
+    // Stops with no day yet. Surfaced in the UI as "Unassigned"; the field
+    // keeps its original name because live shared rooms and saved drafts
+    // already carry it.
+    optional:[],             // {id, day, note}
     bin:[],                  // [stopId]
     info:{ weather:'', closures:'', reservations:'', events:'', notes:'' },
     counter:0                // id counter for stops added in the UI
@@ -110,7 +113,7 @@ export function serializeTrip(trip){
   });
 
   if(trip.optional.length){
-    L.push('## Optional', '');
+    L.push('## Unassigned', '');
     trip.optional.forEach(o => {
       const s = trip.stops[o.id];
       if(!s) return;
@@ -221,7 +224,7 @@ function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
   const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme)\s*:/i;
-  const TOP = /^(hotels?|optional|bin|trip\s*info)\s*$/i;
+  const TOP = /^(hotels?|optional|unassigned|bin|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
   let started = false, inInfo = false;
@@ -314,7 +317,7 @@ export function parseTrip(text){
         if(dayM[2]) day.title = dayM[2].trim();
         section = day;
       } else if(/^hotels?$/i.test(title)) section = 'hotels';
-      else if(/^optional/i.test(title)) section = 'optional';
+      else if(/^(optional|unassigned)/i.test(title)) section = 'optional';   // "Optional" kept as an alias for older files
       else if(/^bin$/i.test(title)) section = 'bin';
       else if(/^trip\s*info/i.test(title) || /^info$/i.test(title)) section = 'info';
       else { warnings.push('Unrecognised section "' + title + '" — skipped.'); section = 'skip'; }
@@ -421,7 +424,7 @@ function splitCsvLine(line, delim){
 
 /* Accepts a CSV with a header row. Recognised columns (any order, case-insensitive):
    name, day, lat, lng, category, duration, description, detail, image, notes, tags.
-   day may be a number, "optional", or empty (→ day 1). */
+   day may be a number, "unassigned"/"optional", or empty (→ day 1). */
 export function parseCsv(text){
   const warnings = [];
   const lines = String(text).split(/\r?\n/).filter(l => l.trim());
@@ -464,7 +467,7 @@ export function parseCsv(text){
       tags: get(cells, idx.tags) ? get(cells, idx.tags).split(/[,|]/).map(t => t.trim()).filter(Boolean) : []
     };
     const dayRaw = get(cells, idx.day).toLowerCase();
-    if(dayRaw === 'optional' || dayRaw === 'pool'){
+    if(dayRaw === 'unassigned' || dayRaw === 'optional' || dayRaw === 'pool'){
       trip.optional.push({ id, day:null, note:'' });
     } else {
       const n = parseInt(dayRaw, 10) || 1;
