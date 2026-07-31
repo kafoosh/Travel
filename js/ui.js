@@ -992,6 +992,113 @@ function renderBin(){
 }
 
 /* =========================================================
+   SEARCH — find any location and where it's slotted
+   ========================================================= */
+function openSearch(){
+  $('search-overlay').classList.add('open');
+  lastFocusedEl = document.activeElement;
+  $('search-input').value = '';
+  $('search-results').innerHTML = '<p class="search-hint">Type to search every stop — scheduled, optional, or binned — by name, description, notes, or tags.</p>';
+  $('search-input').focus();
+  document.body.style.overflow = 'hidden';
+}
+function closeSearch(){
+  $('search-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  if(lastFocusedEl && lastFocusedEl.focus) lastFocusedEl.focus();
+}
+
+/* Where is this stop, and when? Returns {kind, day, time, optMeta}. */
+function locateStop(id, schedules){
+  for(const d of trip().days){
+    if(d.order.includes(id)){
+      const sched = schedules.get(d.id) || schedules.set(d.id, computeSchedule(trip(), d)).get(d.id);
+      const row = sched.rows.find(r => r.stop.id === id);
+      return { kind:'day', day:d, time: row ? row.start : null };
+    }
+  }
+  const opt = trip().optional.find(o => o.id === id);
+  if(opt) return { kind:'optional', optMeta: opt };
+  if(trip().bin.includes(id)) return { kind:'bin' };
+  return { kind:'lost' };
+}
+
+function runSearch(){
+  const q = $('search-input').value.trim().toLowerCase();
+  const out = $('search-results');
+  if(q.length < 2){
+    out.innerHTML = '<p class="search-hint">Keep typing…</p>';
+    return;
+  }
+  const schedules = new Map();
+  const scored = [];
+  Object.values(trip().stops).forEach(s => {
+    const name = s.name.toLowerCase();
+    let score = -1;
+    if(name.startsWith(q)) score = 0;
+    else if(name.includes(q)) score = 1;
+    else if((s.desc || '').toLowerCase().includes(q) || (s.notes || '').toLowerCase().includes(q)
+      || (s.detail || '').toLowerCase().includes(q) || s.tags.some(t => t.toLowerCase().includes(q))) score = 2;
+    if(score >= 0) scored.push({ s, score });
+  });
+  const hotelHits = trip().hotels.filter(h => h.name.toLowerCase().includes(q));
+  scored.sort((a, b) => a.score - b.score || a.s.name.localeCompare(b.s.name));
+
+  if(!scored.length && !hotelHits.length){
+    out.innerHTML = '<p class="search-hint">No matches for “' + esc(q) + '”.</p>';
+    return;
+  }
+  out.innerHTML = '';
+  scored.slice(0, 25).forEach(({ s }) => {
+    const loc = locateStop(s.id, schedules);
+    let whereHtml = '';
+    if(loc.kind === 'day'){
+      whereHtml = `<span class="sr-where">D${loc.day.id} · ${esc(shortTitle(loc.day.title))}${loc.time != null ? ' · ' + formatTime(loc.time) : ''}</span>`;
+    } else if(loc.kind === 'optional'){
+      whereHtml = `<span class="sr-where">Optional${loc.optMeta.day ? ' · suggested D' + loc.optMeta.day : ''}</span>`;
+    } else if(loc.kind === 'bin'){
+      whereHtml = `<span class="sr-where">Bin</span>`;
+    }
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'search-row';
+    row.innerHTML = `<span class="sr-icon">${ICONS[s.cat] || '📍'}</span>
+      <span class="sr-main"><span class="sr-name">${esc(s.name)}</span>${whereHtml}</span>`;
+    row.addEventListener('click', () => {
+      closeSearch();
+      if(loc.kind === 'day'){
+        state.currentDayIndex = trip().days.indexOf(loc.day);
+        setView('days');
+        renderAll();
+        setTimeout(() => {
+          const card = document.querySelector(`.stop-card[data-id="${CSS.escape(s.id)}"]`);
+          if(card){
+            card.scrollIntoView({ behavior:'smooth', block:'center' });
+            card.classList.add('flash');
+            setTimeout(() => card.classList.remove('flash'), 2400);
+          }
+        }, 120);
+      } else if(loc.kind === 'optional'){
+        setView('optional');
+      } else {
+        setView('bin');
+      }
+    });
+    out.appendChild(row);
+  });
+  hotelHits.forEach(h => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'search-row';
+    const usedBy = trip().days.filter(d => d.hotelId === h.id).map(d => 'D' + d.id).join(', ');
+    row.innerHTML = `<span class="sr-icon">🏨</span>
+      <span class="sr-main"><span class="sr-name">${esc(h.name)}</span><span class="sr-where">Hotel${usedBy ? ' · ' + usedBy : ''}</span></span>`;
+    row.addEventListener('click', () => { closeSearch(); setView('info'); });
+    out.appendChild(row);
+  });
+}
+
+/* =========================================================
    ALL STOPS VIEW — master list + group-by-proximity
    ========================================================= */
 function allStopRow(id, fromDay, isOptional, optMeta){
@@ -1447,6 +1554,19 @@ export function wireStaticHandlers(){
   $('btn-view-info').addEventListener('click', () => setView('info'));
   $('group-btn').addEventListener('click', groupByProximity);
   $('add-optional-btn').addEventListener('click', () => openLocationForm(null, 'optional'));
+
+  // search
+  $('btn-search').addEventListener('click', openSearch);
+  $('search-close').addEventListener('click', closeSearch);
+  $('search-overlay').addEventListener('click', (e) => { if(e.target.id === 'search-overlay') closeSearch(); });
+  $('search-input').addEventListener('input', debounce(runSearch, 150));
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const tag = (document.activeElement && document.activeElement.tagName) || '';
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    e.preventDefault();
+    openSearch();
+  });
   $('al-cat').addEventListener('change', refreshHikeFields);
   $('al-lat').addEventListener('input', refreshCoordsStatus);
   $('al-lng').addEventListener('input', refreshCoordsStatus);
@@ -1504,9 +1624,10 @@ export function wireStaticHandlers(){
   // escape closes whichever overlay is open
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape') return;
-    for(const id of ['add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
+    for(const id of ['search-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
       if($(id).classList.contains('open')){
         if(id === 'modal-overlay') closeModal();
+        else if(id === 'search-overlay') closeSearch();
         else { $(id).classList.remove('open'); document.body.style.overflow = ''; }
         return;
       }

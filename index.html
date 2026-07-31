@@ -24,6 +24,7 @@
     <button id="btn-view-optional">Optional</button>
     <button id="btn-view-bin">Bin</button>
     <button id="btn-view-info">Trip Info</button>
+    <button id="btn-search" title="Search the itinerary (press /)">🔍 Search</button>
     <button id="btn-settings" title="Trip settings">⚙ Settings</button>
     <button id="undo-btn" title="Undo last change" disabled>↺ Undo</button>
     <button id="cloud-chip" class="hidden" title="Sync status — opens Trip Info">● Shared</button>
@@ -189,6 +190,18 @@
         <label>Description<textarea id="he-desc" rows="2"></textarea></label>
         <button type="submit" class="reset-btn">Save hotel</button>
       </form>
+    </div>
+  </div>
+</div>
+
+<!-- Search modal -->
+<div class="modal-overlay" id="search-overlay">
+  <div class="modal-box search-box">
+    <button class="modal-close" id="search-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title">Search the itinerary</h3>
+      <input type="text" id="search-input" class="search-input" placeholder="Name, description, notes, tags…" autocomplete="off">
+      <div id="search-results" class="search-results"></div>
     </div>
   </div>
 </div>

@@ -541,6 +541,45 @@ h1.title:hover{color:var(--accent-dark);}
   text-decoration:underline; cursor:pointer;
 }
 
+/* ---------- search ---------- */
+.search-box{max-width:520px;}
+.search-input{
+  width:100%;
+  font-family:'Work Sans', sans-serif;
+  font-size:16px;
+  padding:11px 12px;
+  border-radius:9px;
+  border:1px solid var(--line);
+  background:var(--card);
+  color:var(--ink);
+}
+.search-results{margin-top:10px; max-height:52vh; overflow-y:auto; display:flex; flex-direction:column;}
+.search-hint{font-size:13px; color:var(--ink-soft); padding:8px 2px;}
+.search-row{
+  display:flex; align-items:center; gap:10px;
+  text-align:left;
+  padding:9px 8px;
+  border:none;
+  border-bottom:1px dashed var(--line);
+  background:none;
+  cursor:pointer;
+  border-radius:6px;
+}
+.search-row:hover{background:var(--accent-tint);}
+.search-row:last-child{border-bottom:none;}
+.sr-icon{flex:none; font-size:18px;}
+.sr-main{display:flex; flex-direction:column; gap:1px; min-width:0;}
+.sr-name{font-size:14.5px; color:var(--ink); font-family:'Work Sans', sans-serif; overflow-wrap:anywhere;}
+.sr-where{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  color:var(--ink-soft);
+}
+.stop-card.flash{
+  box-shadow:0 0 0 3px var(--gold);
+  transition:box-shadow .4s;
+}
+
 /* ---------- Theme picker ---------- */
 .theme-picker{display:flex; gap:10px; flex-wrap:wrap;}
 .theme-swatch{
