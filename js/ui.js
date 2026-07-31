@@ -13,7 +13,7 @@ import { computeSchedule, getHotel } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, leaveRoom, shareUrl } from './cloud.js';
-import { buildPrompt } from './llm.js';
+import { buildPrompt, PROMPT_PREFS } from './llm.js';
 import { attachAutocomplete } from './geocode.js';
 import { googleMapsDayUrl, tripKml } from './exporters.js';
 
@@ -51,6 +51,7 @@ let mapFitPending = false;
 let modalStopId = null;
 let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
 let promptMode = null;    // sticky mode radio choice
+let promptPrefs = {};     // tailoring controls (destination, pace, interests…)
 let pendingFlash = null;   // {id, until} — highlight survives async re-renders
 
 function applyPendingFlash(){
@@ -1485,6 +1486,11 @@ export function renderInfo(){
         <label><input type="radio" name="prompt-mode" value="new"> Plan a new trip from scratch</label>
         <label><input type="radio" name="prompt-mode" value="edit"> Edit this trip — the prompt includes the current plan so the AI knows exactly what exists, and returns the full updated trip to import back</label>
       </div>
+      <details class="prefs-box" id="prefs-box">
+        <summary>Tailor the plan <span class="prefs-count" id="prefs-count"></span></summary>
+        <div class="prefs-grid" id="prefs-grid"></div>
+        <button type="button" class="reset-btn" id="prefs-clear">Clear preferences</button>
+      </details>
       <textarea class="prompt-area" id="llm-prompt" spellcheck="false"></textarea>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="copy-prompt">Copy prompt</button>
@@ -1572,12 +1578,13 @@ export function renderInfo(){
     if(promptEdits != null && !force){ $('llm-prompt').value = promptEdits; return; }
     const mode = (el.querySelector('input[name="prompt-mode"]:checked') || {}).value || 'new';
     promptEdits = null;
-    $('llm-prompt').value = buildPrompt(trip(), mode);
+    $('llm-prompt').value = buildPrompt(trip(), mode, promptPrefs);
   };
   el.querySelectorAll('input[name="prompt-mode"]').forEach(r => {
     r.checked = promptMode ? r.value === promptMode : r.value === defaultMode;
     r.addEventListener('change', () => { promptMode = r.value; refreshPrompt(true); });
   });
+  renderPromptPrefs(() => refreshPrompt(true));
   $('llm-prompt').addEventListener('input', () => { promptEdits = $('llm-prompt').value; });
   refreshPrompt();
   $('copy-prompt').addEventListener('click', () => copyText($('llm-prompt').value, $('copy-prompt'), 'Copy prompt'));
@@ -1610,6 +1617,71 @@ export function renderInfo(){
   });
   $('cloud-copy').addEventListener('click', () => copyText($('cloud-link').value, $('cloud-copy'), 'Copy link'));
   renderCloudUI();
+}
+
+/* Build the "Tailor the plan" controls from PROMPT_PREFS; every change
+   regenerates the prompt. Text inputs debounce so typing stays smooth. */
+function renderPromptPrefs(onChange){
+  const grid = $('prefs-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  const bump = debounce(onChange, 250);
+
+  PROMPT_PREFS.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'pref-item' + (p.type === 'multi' ? ' wide' : '');
+    const lab = document.createElement('div');
+    lab.className = 'pref-label';
+    lab.textContent = p.label;
+    wrap.appendChild(lab);
+
+    if(p.type === 'text'){
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = 'pref-text';
+      inp.placeholder = p.placeholder || '';
+      inp.value = promptPrefs[p.key] || '';
+      inp.addEventListener('input', () => { promptPrefs[p.key] = inp.value; updatePrefCount(); bump(); });
+      wrap.appendChild(inp);
+    } else {
+      const row = document.createElement('div');
+      row.className = 'chip-row';
+      p.options.forEach(opt => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'pref-chip';
+        chip.textContent = opt;
+        const isOn = p.type === 'multi'
+          ? (promptPrefs[p.key] || []).includes(opt)
+          : (promptPrefs[p.key] || p.def) === opt;
+        chip.classList.toggle('on', isOn);
+        chip.addEventListener('click', () => {
+          if(p.type === 'multi'){
+            const cur = promptPrefs[p.key] || [];
+            promptPrefs[p.key] = cur.includes(opt) ? cur.filter(x => x !== opt) : [...cur, opt];
+          } else {
+            // clicking the active choice clears it back to "unspecified"
+            promptPrefs[p.key] = (promptPrefs[p.key] || p.def) === opt && promptPrefs[p.key] ? null : opt;
+          }
+          renderPromptPrefs(onChange);
+          onChange();
+        });
+        row.appendChild(chip);
+      });
+      wrap.appendChild(row);
+    }
+    grid.appendChild(wrap);
+  });
+  updatePrefCount();
+  const clear = $('prefs-clear');
+  if(clear) clear.onclick = () => { promptPrefs = {}; renderPromptPrefs(onChange); onChange(); };
+}
+
+function updatePrefCount(){
+  const badge = $('prefs-count');
+  if(!badge) return;
+  const n = Object.values(promptPrefs).filter(v => Array.isArray(v) ? v.length : (v && String(v).trim())).length;
+  badge.textContent = n ? '· ' + n + ' set' : '· optional';
 }
 
 function autoGrow(ta){

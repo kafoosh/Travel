@@ -12,15 +12,57 @@
 
 import { serializeTrip } from './format.js';
 
-export function buildPrompt(trip, mode = 'new'){
-  if(mode === 'edit') return buildEditPrompt(trip);
-  return buildNewPrompt(trip);
+/* Preference controls surfaced in the UI. Each becomes a line of the
+   prompt's "WHAT I WANT" block, so the plan is tailored without the user
+   having to write prose. Kept declarative so the UI renders itself from
+   this list — adding an option here adds the control. */
+export const PROMPT_PREFS = [
+  { key:'destination', type:'text', label:'Destination', placeholder:'e.g. Lisbon, or Kyoto & Osaka' },
+  { key:'travellers', type:'text', label:'Who’s going', placeholder:'e.g. 2 adults + a 7-year-old' },
+  { key:'pace', type:'choice', label:'Pace', options:['Relaxed','Balanced','Packed'], def:'Balanced' },
+  { key:'budget', type:'choice', label:'Budget', options:['Shoestring','Mid-range','Comfortable','Luxury'], def:'Mid-range' },
+  { key:'transport', type:'choice', label:'Getting around', options:['Any','Mostly walking','Public transport','Cycling','Car'], def:'Any' },
+  { key:'startTime', type:'choice', label:'Mornings', options:['Early riser','Normal','Slow starts'], def:'Normal' },
+  { key:'interests', type:'multi', label:'Interests', options:['History','Art & museums','Food & drink','Nightlife','Nature & hiking','Architecture','Shopping','Local markets','Beaches','Photography','Off the beaten path','Kid-friendly'] },
+  { key:'food', type:'multi', label:'Food', options:['Restaurant picks each day','Street food','Vegetarian','Vegan','Halal','Gluten-free','One splurge meal'] },
+  { key:'accessibility', type:'multi', label:'Access needs', options:['Step-free','Limited walking','Stroller-friendly'] },
+  { key:'avoid', type:'text', label:'Avoid', placeholder:'e.g. crowds, long queues, early flights' },
+  { key:'extras', type:'text', label:'Anything else', placeholder:'e.g. must see the Benfica match on the 12th' },
+];
+
+/* Turn collected preference values into prompt lines. */
+function prefLines(prefs){
+  if(!prefs) return '';
+  const L = [];
+  const val = k => prefs[k];
+  const add = (label, v) => { if(v && String(v).trim()) L.push('- ' + label + ': ' + String(v).trim()); };
+  add('Destination', val('destination'));
+  add('Travellers', val('travellers'));
+  if(val('pace')) add('Pace', val('pace') + (val('pace') === 'Relaxed' ? ' — fewer stops, more time at each' : val('pace') === 'Packed' ? ' — fit in as much as reasonably possible' : ''));
+  add('Budget', val('budget'));
+  if(val('transport') && val('transport') !== 'Any'){
+    add('Getting around', val('transport') + ' — prefer this mode, and set "arrive by" on stops where it applies');
+  }
+  if(val('startTime')) add('Mornings', val('startTime') === 'Early riser' ? 'happy to start by 08:00' : val('startTime') === 'Slow starts' ? 'prefer starting around 10:00–10:30' : 'normal ~09:00 starts');
+  const arr = k => Array.isArray(val(k)) ? val(k) : [];
+  if(arr('interests').length) add('Interests', arr('interests').join(', '));
+  if(arr('food').length) add('Food', arr('food').join(', '));
+  if(arr('accessibility').length) add('Accessibility', arr('accessibility').join(', ') + ' — respect this when choosing stops and routes');
+  add('Please avoid', val('avoid'));
+  add('Also', val('extras'));
+  if(!L.length) return '';
+  return '\n\nWHAT I WANT\n===========\n' + L.join('\n');
 }
 
-function buildEditPrompt(trip){
+export function buildPrompt(trip, mode = 'new', prefs = null){
+  if(mode === 'edit') return buildEditPrompt(trip, prefs);
+  return buildNewPrompt(trip, prefs);
+}
+
+function buildEditPrompt(trip, prefs){
   return `You are a travel-planning assistant. I have an existing trip in a structured markdown format — the complete current plan is at the bottom of this message. I want you to EDIT it.
 
-First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.
+First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.${prefLines(prefs)}
 
 RULES
 =====
@@ -38,7 +80,7 @@ CURRENT TRIP DOCUMENT
 ${serializeTrip(trip)}`;
 }
 
-function buildNewPrompt(trip){
+function buildNewPrompt(trip, prefs){
   const dayCount = trip.days.length;
   const hasName = trip.name && trip.name !== 'Untitled Trip';
   const asks = [];
@@ -53,7 +95,7 @@ Put the ENTIRE document inside a single fenced code block (start a line with thr
 ${hasName ? `Destination / trip: ${trip.name}` : 'First ask me where I am going, for how many days, and roughly when.'}
 Number of days: ${dayCount}${trip.startDate ? `\nTrip start date: ${trip.startDate} (use real weekdays for closures and events)` : ''}
 
-Before writing the plan, ask me any questions you need about interests, pace, budget, dietary needs, and where I'm staying (or suggest 2–3 hotels yourself).
+Before writing the plan, ask me any questions you still need answered, and suggest 2–3 hotels if I haven't named one.${prefLines(prefs)}
 
 FORMAT SPECIFICATION
 ====================
