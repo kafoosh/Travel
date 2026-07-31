@@ -8,14 +8,15 @@
 
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
 import { CATEGORIES, DEFAULT_DUR, THEMES, newDay, serializeTrip, importText, blankTrip } from './format.js';
-import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId } from './state.js';
+import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, forgetRoomCache } from './state.js';
 import { computeSchedule, getHotel } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
-import { cloud, cloudStatusText, createRoom, leaveRoom, shareUrl } from './cloud.js';
+import { cloud, cloudStatusText, createRoom, duplicateRoom, deleteRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt, PROMPT_PREFS } from './llm.js';
 import { attachAutocomplete } from './geocode.js';
 import { googleMapsDayUrl, tripKml } from './exporters.js';
+import { mountImage } from './img.js';
 
 const ICONS = {
   landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
@@ -331,9 +332,9 @@ function renderScheduleList(day, sched){
 
     const chips = s.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') +
       (s.notes ? `<span class="tag-chip note-chip" title="${esc(s.notes)}">📝 note</span>` : '');
-    const illustrationHtml = s.img
-      ? `<div class="stop-illustration has-img"><img src="${esc(s.img)}" alt="${esc(s.name)}" loading="lazy"></div>`
-      : `<div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>`;
+    // The icon renders first and a photo only replaces it once one of the
+    // candidate URLs actually loads (see img.js) — a dead link shows the icon.
+    const illustrationHtml = `<div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>`;
 
     const dayOptionsHtml = trip().days.filter(d => d.id !== day.id)
       .map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('') +
@@ -367,12 +368,7 @@ function renderScheduleList(day, sched){
       </div>
     `;
 
-    const imgEl = card.querySelector('.stop-illustration img');
-    if(imgEl) imgEl.addEventListener('error', () => {
-      const box = imgEl.parentElement;
-      box.classList.remove('has-img');
-      box.textContent = ICONS[s.cat] || '📍';
-    });
+    if(s.img) mountImage(card.querySelector('.stop-illustration'), s.img, ICONS[s.cat] || '📍', { alt: s.name });
 
     const sel = card.querySelector('.move-to-day');
     sel.addEventListener('click', e => e.stopPropagation());
@@ -833,12 +829,8 @@ function openModal(stopId, row){
   if(!stop) return;
   modalStopId = stopId;
   const photo = $('modal-photo');
-  if(stop.img){
-    photo.innerHTML = `<img src="${esc(stop.img)}" alt="${esc(stop.name)}">`;
-    photo.querySelector('img').addEventListener('error', () => { photo.textContent = ICONS[stop.cat] || '📍'; });
-  } else {
-    photo.textContent = ICONS[stop.cat] || '📍';
-  }
+  if(stop.img) mountImage(photo, stop.img, ICONS[stop.cat] || '📍', { alt: stop.name });
+  else { photo.textContent = ICONS[stop.cat] || '📍'; photo.classList.remove('has-img'); }
   $('modal-time-row').textContent = row ? (formatTime(row.start) + ' · ' + formatDur(stop.dur)) : formatDur(stop.dur);
   $('modal-title').textContent = stop.name;
   $('modal-tags').innerHTML = stop.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('');
@@ -1642,9 +1634,14 @@ export function renderInfo(){
       </div>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="cloud-create">Create a share link</button>
+        <button class="reset-btn hidden" id="cloud-duplicate" title="Copy this trip to a second room with its own link — the current link keeps the trip as it is now">Duplicate to a new room</button>
         <button class="reset-btn hidden" id="cloud-leave">Stop syncing</button>
       </div>
-      <p class="cloud-warn"><b>Worth knowing:</b> anyone holding the link can edit the trip, and a link that gets out can't be revoked — you'd have to create a new one. Simultaneous edits resolve last-change-wins. "Stop syncing" only detaches this browser; it doesn't delete the shared copy.</p>
+      <div class="cloud-btn-row" id="cloud-danger-row">
+        <button class="reset-btn danger" id="cloud-empty" title="Wipe the itinerary but keep this room and its link">Empty this room</button>
+        <button class="reset-btn danger" id="cloud-delete" title="Delete the shared copy so the link stops working">Delete this room</button>
+      </div>
+      <p class="cloud-warn"><b>Worth knowing:</b> anyone holding the link can edit the trip, and a link that gets out can't be revoked — duplicate to a new room (and delete the old one) to cut it off. Simultaneous edits resolve last-change-wins. "Stop syncing" only detaches this browser and leaves the shared copy alone; "Empty this room" clears the itinerary for everyone on the link but keeps the link working; "Delete this room" removes the shared copy for good.</p>
     </div>
     <div class="infocard">
       <h3>How to use this site</h3>
@@ -1723,6 +1720,9 @@ export function renderInfo(){
 
   // cloud
   $('cloud-create').addEventListener('click', createRoom);
+  $('cloud-duplicate').addEventListener('click', duplicateCurrentRoom);
+  $('cloud-empty').addEventListener('click', emptyCurrentRoom);
+  $('cloud-delete').addEventListener('click', deleteCurrentRoom);
   $('cloud-leave').addEventListener('click', () => {
     if(confirm('Stop syncing this browser with the shared trip? The shared copy stays available at the link.')) leaveRoom();
   });
@@ -1894,8 +1894,70 @@ export function renderCloudUI(){
   const inRoom = !!cloud.room;
   $('cloud-link-row').classList.toggle('hidden', !inRoom);
   $('cloud-create').classList.toggle('hidden', inRoom);
+  $('cloud-duplicate').classList.toggle('hidden', !inRoom);
   $('cloud-leave').classList.toggle('hidden', !inRoom);
+  $('cloud-danger-row').classList.toggle('hidden', !inRoom);
   if(inRoom) $('cloud-link').value = shareUrl(cloud.room);
+}
+
+/* =========================================================
+   ROOM TOOLS — duplicate / empty / delete
+
+   All three are destructive in different amounts, so each one
+   spells out exactly what happens to the link and to everyone
+   else holding it before it does anything.
+   ========================================================= */
+
+/* "My Trip" → "My Trip (copy)" → "My Trip (copy 2)" → … */
+function copyName(name){
+  const m = /^(.*) \(copy(?: (\d+))?\)$/.exec(name || '');
+  if(m) return m[1] + ' (copy ' + (parseInt(m[2] || '1', 10) + 1) + ')';
+  return (name || 'Untitled Trip') + ' (copy)';
+}
+
+async function duplicateCurrentRoom(){
+  const name = copyName(trip().name);
+  if(!confirm('Duplicate this trip into a new room?\n\nThis browser moves to the copy — named "' + name + '", with its own link. The room you\'re in now keeps the trip exactly as it stands, at the link you already have.')) return;
+  const btn = $('cloud-duplicate');
+  btn.disabled = true;
+  const ok = await duplicateRoom(() => { trip().name = name; });
+  btn.disabled = false;
+  if(!ok){
+    renderCloudUI();
+    alert('Could not create the copy.\n\n' + (cloud.error || 'Check the connection and try again.'));
+    return;
+  }
+  saveState();
+  renderAll();
+  renderInfo();
+}
+
+function emptyCurrentRoom(){
+  if(!confirm('Delete everything in this room — every day, location, hotel and trip note?\n\nThe room and its link keep working: everyone on the link ends up on an empty trip. Undo can bring it back from this device.')) return;
+  pushUndo();
+  replaceTrip(blankTrip());
+  applyTheme();
+  renderAll();
+  renderInfo();
+}
+
+async function deleteCurrentRoom(){
+  if(!confirm('Permanently delete this shared trip?\n\nThe shared copy is removed and the link stops working for everyone. This browser drops back to a blank, unshared trip — Undo can bring the itinerary back if you want to re-share it somewhere new.')) return;
+  const btn = $('cloud-delete');
+  btn.disabled = true;
+  const res = await deleteRoom();
+  btn.disabled = false;
+  if(res.error){
+    renderCloudUI();
+    alert('Could not delete this room — nothing was changed.\n\n' + res.error);
+    return;
+  }
+  forgetRoomCache(res.code);
+  pushUndo();
+  replaceTrip(blankTrip());
+  applyTheme();
+  renderAll();
+  renderInfo();
 }
 
 /* =========================================================
@@ -1962,7 +2024,10 @@ function submitSettings(e){
 }
 
 function clearTrip(){
-  if(!confirm('Start a new blank trip? The current one is replaced (Undo can bring it back, and Export first if you want a file copy).')) return;
+  const shared = cloud.room
+    ? '\n\nThis trip is shared: the blank trip syncs to the link too, so everyone on it loses the itinerary. To keep the shared copy, use "Stop syncing" (Trip Info) first.'
+    : '';
+  if(!confirm('Start a new blank trip? The current one is replaced (Undo can bring it back, and Export first if you want a file copy).' + shared)) return;
   pushUndo();
   replaceTrip(blankTrip());
   applyTheme();

@@ -135,7 +135,7 @@ FORMAT SPECIFICATION
 - duration: <realistic visit length in minutes>
 - fixed start: <optional HH:MM for things pinned to a clock: flight landing/boarding time, train departure, timed museum entry. The schedule waits for it and flags conflicts.>
 - arrive by: <optional: walk | cycle | transit | taxi | boat — pins how the traveller reaches THIS stop when one mode clearly makes sense (a ferry-only island, a cycling city, a stop best reached by taxi). Omit for automatic selection.>
-- image: <public image URL, optional — prefer Wikimedia Commons: https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200>
+- image: <public image URL, optional — use Wikimedia Commons in exactly this form: https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200, with a file name you are confident exists. Never hand-build an upload.wikimedia.org path (the hashed folders can't be guessed), and skip the field entirely rather than inventing a URL — a missing image just shows the category icon.>
 - description: <1–2 sentences: what it is and one practical tip (booking, timing, closures)>
 - detail: <2–4 sentences of history or a great story — the kind of thing a knowledgeable friend would tell you standing in front of it>
 - tags: <optional comma-separated labels, e.g. a theme the trip follows>

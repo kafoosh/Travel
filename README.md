@@ -17,6 +17,8 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 - **Unassigned stops** — stops with no day yet live in their own tab *and* in a collapsible tray on every day panel and on All Stops (always present, so it is also where you add a stop without a day). Drag a chip onto the schedule to place it at an exact position, or click it to drop it straight into that day (in All Stops, clicking offers a day picker, so it works on touch too).
 - **Notes everywhere** — every location has a free-text notes field (booking refs, must-try dishes…), included in export/import and sync.
 - **Share on demand — and sharing is saving** — an unshared trip lives only in its browser tab (a reload keeps it; a fresh tab at the bare URL always opens a new blank trip). Click "Create a share link" and the trip moves to Cloud Firestore at a stable URL: everyone holding the link edits the same plan, live, and that link is how you come back to it. Requires the one-time Firebase setup below; without it the site still works as a tab-local planner with export/import.
+- **Room tools** — from Trip Info: **duplicate** the current room into a second one (a copy of the trip at a brand-new link, the original untouched — the way to fork a plan, or to cut off a link that got out), **empty** a room (wipe the itinerary, keep the room and its link), or **delete** a room outright (the shared copy is removed and the link stops working). Emptying and deleting are one Undo away on the device that did it.
+- **Forgiving images** — a photo URL that doesn't load never leaves a broken box: the category icon shows from the start and is only replaced once an image actually decodes. Wikimedia Commons *File:* page links are rewritten to the real file, dead thumbnail sizes fall back to the original, `http://` is upgraded, and each candidate is retried twice before the icon simply stays.
 - **Color schemes** — parchment (default), lagoon, terracotta, midnight, field-notes. The choice travels with the trip file.
 
 ## Running it
@@ -113,15 +115,20 @@ Sharing uses Cloud Firestore's free tier. Until configured, the Share button exp
          allow create, update: if request.auth != null
            && code.matches('^[a-z0-9]{12,40}$')
            && request.resource.data.keys().hasOnly(['trip', 'updatedBy', 'updatedAt']);
-         allow delete: if false;
+         // "Delete this room" in Trip Info. Swap for `if false` to make rooms
+         // permanent — the button then reports that the rules refuse it.
+         allow delete: if request.auth != null
+           && code.matches('^[a-z0-9]{12,40}$');
        }
      }
    }
    ```
 
+   Deployments set up before room deletion existed have `allow delete: if false` published; re-paste the block above to enable the button.
+
 5. Project settings → **Your apps** → add a **Web app** → copy the `firebaseConfig` object into `js/config.js` (replacing `null`).
 
-The config values are public identifiers, not secrets — the rules above are what guard the data. Room codes are 16 random characters in the URL fragment; anyone with a link can edit that trip, and links can't be revoked (create a new room instead).
+The config values are public identifiers, not secrets — the rules above are what guard the data. Room codes are 16 random characters in the URL fragment; anyone with a link can edit that trip, and links can't be revoked — to cut off a link that got out, duplicate the trip to a new room and delete the old one.
 
 ## Routing services & being a good guest
 
@@ -149,7 +156,8 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | `js/optimize.js` | 2-opt day ordering + capacity-aware multi-day distribution |
 | `js/ui.js` | All rendering and interaction |
 | `js/state.js` | Persistence, undo, normalisation |
-| `js/cloud.js` | Share-on-demand Firestore rooms |
+| `js/cloud.js` | Share-on-demand Firestore rooms (create / duplicate / delete) |
+| `js/img.js` | Photo URL repair, retries, icon fallback |
 | `js/llm.js` | The AI-assistant prompt builder |
 | `js/config.js` | **Deployment config — paste your Firebase config here** |
 | `vendor/leaflet/` | Leaflet 1.9.4, vendored (no CDN dependency) |
