@@ -520,19 +520,30 @@ function shortTitle(t){ return t.length > 18 ? t.slice(0, 17) + '…' : t; }
 /* Collapsible tray of unassigned stops. Chips are draggable onto a day's
    schedule (or, in All Stops, onto a day heading). Clicking a chip adds it
    straight to `dayId`; without one (All Stops) it opens a small day picker,
-   so the tray works on touch devices too. */
+   so the tray works on touch devices too.
+
+   Always rendered, even with nothing in it: the tray is also where you ADD a
+   stop that has no day yet, so hiding it when empty hides the only affordance
+   for filling it. */
 function renderUnassignedTray(host, dayId){
   const items = trip().optional;
-  if(!items.length) return;
   const box = document.createElement('details');
-  box.className = 'unassigned-tray';
+  box.className = 'unassigned-tray' + (items.length ? '' : ' empty');
   const sum = document.createElement('summary');
-  sum.innerHTML = 'Unassigned <span class="ut-count">' + items.length + '</span> ' +
-    '<span class="ut-hint">' + (dayId ? 'click to add to this day, or drag onto the schedule' : 'drag onto a day, or click to choose one') + '</span>';
+  sum.innerHTML = 'Unassigned <span class="ut-count' + (items.length ? '' : ' zero') + '">' + items.length + '</span> ' +
+    '<span class="ut-hint">' + (items.length
+      ? (dayId ? 'click to add to this day, or drag onto the schedule' : 'drag onto a day, or click to choose one')
+      : 'stops with no day yet — add one here') + '</span>';
   box.appendChild(sum);
 
   const row = document.createElement('div');
   row.className = 'ut-chips';
+  if(!items.length){
+    const hint = document.createElement('span');
+    hint.className = 'ut-empty';
+    hint.textContent = 'Nothing unassigned. Add a stop here to park it without a day, or send an existing one over with “Move to… → Unassigned”.';
+    row.appendChild(hint);
+  }
   items.forEach(o => {
     const s = trip().stops[o.id];
     if(!s) return;
@@ -575,6 +586,15 @@ function renderUnassignedTray(host, dayId){
     });
     row.appendChild(chip);
   });
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'ut-chip ut-add';
+  add.textContent = '+ Add unassigned stop';
+  add.title = 'Add a stop with no day yet — park it here and place it later';
+  add.addEventListener('click', () => openLocationForm(null, 'optional'));
+  row.appendChild(add);
+
   box.appendChild(row);
   host.appendChild(box);
 }
