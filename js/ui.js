@@ -15,6 +15,7 @@ import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt } from './llm.js';
 import { attachAutocomplete } from './geocode.js';
+import { googleMapsDayUrl, tripKml } from './exporters.js';
 
 const ICONS = {
   landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
@@ -41,6 +42,8 @@ const THEME_PREVIEW = {
 let dragSourceId = null;
 let lastFocusedEl = null;
 let leafletMap = null;
+let mapLayerGroup = null;
+let lastMapDayId = null;
 let mapFitPts = null;
 let mapFitPending = false;
 let modalStopId = null;
@@ -141,6 +144,7 @@ function renderDayPanel(){
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         ${date ? `<span class="day-date-tag">${formatDayDate(date)}</span>` : ''}
         <button class="reset-btn" id="edit-day-btn">✎ Edit day</button>
+        <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">🗺 Google Maps</button>
         <button class="reset-btn" id="add-location-btn">+ Add location</button>
         <button class="reset-btn" id="optimize-order" title="Reorder this day's stops to minimise travel time">✨ Optimize route</button>
       </div>
@@ -165,6 +169,12 @@ function renderDayPanel(){
   `;
 
   $('edit-day-btn').addEventListener('click', () => openDayEdit(state.currentDayIndex));
+  $('gmaps-day-btn').addEventListener('click', () => {
+    const { url, truncated } = googleMapsDayUrl(trip(), day);
+    if(!url){ alert('This day needs at least two located stops for a Google Maps route.'); return; }
+    if(truncated) alert('Google Maps direction links cap at 11 points — opening the first 11 stops of this day.');
+    window.open(url, '_blank', 'noopener');
+  });
   $('add-location-btn').addEventListener('click', () => openLocationForm(null, day.id));
   $('optimize-order').addEventListener('click', () => {
     pushUndo();
@@ -530,13 +540,22 @@ function renderMap(day, sched){
     return;
   }
 
-  if(leafletMap){ leafletMap.remove(); leafletMap = null; }
-  leafletMap = L.map('map', { scrollWheelZoom: false });
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(leafletMap);
+  // Reuse the map instance whenever its container survived the render —
+  // recreating Leaflet on every routed-time arrival flickers tiles and
+  // stomps the user's pan/zoom.
+  const sameContainer = leafletMap && leafletMap.getContainer() === mapEl;
+  if(!sameContainer){
+    if(leafletMap){ try{ leafletMap.remove(); }catch(e){} }
+    leafletMap = L.map('map', { scrollWheelZoom: false });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(leafletMap);
+    mapLayerGroup = L.layerGroup().addTo(leafletMap);
+    lastMapDayId = null;
+  } else {
+    mapLayerGroup.clearLayers();
+  }
 
   const pts = [];        // marker points, in visit order (drives fitBounds)
   const segs = [];       // legs between consecutive points: {from, to, path|null}
@@ -551,7 +570,7 @@ function renderMap(day, sched){
       iconSize: [26,26],
       iconAnchor: [13,24]
     });
-    L.marker([hotel.lat, hotel.lng], { icon: hotelIcon }).addTo(leafletMap)
+    L.marker([hotel.lat, hotel.lng], { icon: hotelIcon }).addTo(mapLayerGroup)
       .bindPopup('<b>' + esc(hotel.name) + '</b><br>start / end of day');
     pts.push([hotel.lat, hotel.lng]);
     prevPt = [hotel.lat, hotel.lng];
@@ -567,7 +586,7 @@ function renderMap(day, sched){
       iconSize: [26,26],
       iconAnchor: [13,24]
     });
-    L.marker([s.lat, s.lng], { icon }).addTo(leafletMap)
+    L.marker([s.lat, s.lng], { icon }).addTo(mapLayerGroup)
       .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start));
     const cur = [s.lat, s.lng];
     // travelPath on a row is the routed geometry of the leg ARRIVING at it
@@ -585,7 +604,7 @@ function renderMap(day, sched){
         iconSize: [26,26],
         iconAnchor: [13,24]
       });
-      L.marker(end, { icon: flagIcon }).addTo(leafletMap)
+      L.marker(end, { icon: flagIcon }).addTo(mapLayerGroup)
         .bindPopup('<b>' + esc(s.name) + '</b><br>hike ends here');
       segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: true });
       pts.push(end);
@@ -605,16 +624,19 @@ function renderMap(day, sched){
     const color = seg.hike ? gold : accent;   // hikes draw in the accent-gold so they read as "on foot, on purpose"
     if(seg.path && seg.path.length > 1){
       // Real routed geometry: solid line following the streets/canals/trails.
-      L.polyline(seg.path, { color, weight: 3.5, opacity: 0.85 }).addTo(leafletMap);
+      L.polyline(seg.path, { color, weight: 3.5, opacity: 0.85 }).addTo(mapLayerGroup);
       boundPts.push(...seg.path);
     } else {
       // No routed shape (yet, or boat shuttle): dashed straight estimate.
-      L.polyline([seg.from, seg.to], { color, weight: 3, dashArray: '6 6', opacity: 0.7 }).addTo(leafletMap);
+      L.polyline([seg.from, seg.to], { color, weight: 3, dashArray: '6 6', opacity: 0.7 }).addTo(mapLayerGroup);
     }
   });
 
   mapFitPts = boundPts;
   mapFitPending = false;
+  const dayChanged = lastMapDayId !== day.id || !sameContainer;
+  lastMapDayId = day.id;
+  if(!dayChanged) return;              // same day refreshed: keep the user's pan/zoom
   if(boundPts.length > 1){
     if(!fitMapToDay()){
       leafletMap.setView(L.latLngBounds(boundPts).getCenter(), 13);
@@ -624,6 +646,17 @@ function renderMap(day, sched){
   } else {
     leafletMap.setView([30, 10], 2);   // blank trip: whole-world view
   }
+}
+
+/* Light refresh: recompute times and redraw list + map layers WITHOUT
+   rebuilding the panel DOM (so the map instance and pan/zoom survive).
+   Used when routed travel times land in the background. */
+function refreshDaySchedule(){
+  const day = currentDay();
+  if(!document.getElementById('schedule-list')) { renderDayPanel(); return; }
+  const sched = computeSchedule(trip(), day);
+  renderScheduleList(day, sched);
+  renderMap(day, sched);
 }
 
 /* =========================================================
@@ -1340,9 +1373,10 @@ export function renderInfo(){
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Import &amp; export</h3>
-      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output.</p>
+      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output. The KML export makes a shareable Google map: go to <a href="https://mymaps.google.com" target="_blank" rel="noopener">mymaps.google.com</a> → Create a new map → Import → pick the .kml — every day becomes a toggleable layer with pins and the route.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="export-btn">⬇ Export trip (.md)</button>
+        <button class="reset-btn" id="export-kml-btn" title="One folder per day with pins and route lines — import at mymaps.google.com for a shareable Google map">⬇ Export KML (Google My Maps)</button>
         <button class="reset-btn" id="import-file-btn">⬆ Import file (.md / .txt / .csv)</button>
         <input type="file" id="import-file" accept=".md,.txt,.csv,text/plain,text/markdown,text/csv" class="hidden">
         <button class="reset-btn hidden" id="demo-btn">Load example trip (Rome &amp; Venice)</button>
@@ -1423,6 +1457,14 @@ export function renderInfo(){
 
   // import / export
   $('export-btn').addEventListener('click', exportTrip);
+  $('export-kml-btn').addEventListener('click', () => {
+    const blob = new Blob([tripKml(trip())], { type: 'application/vnd.google-earth.kml+xml' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = slugify(trip().name) + '.kml';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  });
   $('import-file-btn').addEventListener('click', () => $('import-file').click());
   $('import-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -1787,7 +1829,7 @@ export function wireStaticHandlers(){
 
   // routed travel times landing → refresh the schedule quietly
   onRoutingUpdate(() => {
-    if(state.currentView === 'days') renderDayPanel();
+    if(state.currentView === 'days') refreshDaySchedule();
     renderFooter();
   });
 }

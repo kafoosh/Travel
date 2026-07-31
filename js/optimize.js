@@ -105,7 +105,29 @@ export function optimizeDayOrder(trip, day){
 }
 
 /* =========================================================
-   AUTO-PLAN
+   AUTO-PLAN (neighbourhood packing)
+
+   Model: a good day is a NEIGHBOURHOOD — a tight cluster of
+   places you'd naturally walk between — sized by what actually
+   fits in the day (visit lengths + walking within the area).
+   Hotels are deliberately ignored while planning: the day is
+   built around where the stops are, not where you sleep.
+
+   1. Movable stops agglomerate into micro-neighbourhoods
+      (everything within ~0.8 km chains together); oversized
+      neighbourhoods split along their walking chain.
+   2. Days with anchors (flights, trains, boats, check-ins —
+      immovable by definition) claim the neighbourhoods nearest
+      their anchors, up to a comfortable day length.
+   3. Remaining neighbourhoods chain-pack into the free days,
+      region by region: adjacent areas land on the same or
+      adjacent days, and a day closes when adding the next
+      neighbourhood would blow its time budget.
+   4. Within each day, anchors keep their original positions —
+      a check-in that started the day still starts it, a
+      departure train still ends it. Movable stops slot into
+      the gaps around them, each gap ordered by nearest-
+      neighbour + 2-opt.
    ========================================================= */
 
 function centroid(pts){
@@ -115,6 +137,51 @@ function centroid(pts){
   };
 }
 
+/* Greedy nearest-neighbour chain over stops (walking minutes). */
+function chainOrder(stops){
+  if(stops.length < 3) return stops.slice();
+  const rem = stops.slice(1);
+  const out = [stops[0]];
+  while(rem.length){
+    const cur = out[out.length - 1];
+    let bi = 0, bd = Infinity;
+    rem.forEach((s, i) => { const d = legMinutes(cur, s, false); if(d < bd){ bd = d; bi = i; } });
+    out.push(rem.splice(bi, 1)[0]);
+  }
+  return out;
+}
+
+/* Visit minutes + a rough internal walking chain for a set of stops. */
+function hoodMinutes(stops){
+  let m = stops.reduce((n, s) => n + s.dur, 0);
+  const ordered = chainOrder(stops);
+  for(let i = 1; i < ordered.length; i++) m += legMinutes(ordered[i-1], ordered[i], false);
+  return m;
+}
+
+/* NN + 2-opt with optional fixed endpoints (null = free end). */
+function orderStops(stops, startPt, endPt){
+  if(stops.length < 2) return stops.slice();
+  const rem = stops.slice();
+  const path = [];
+  let cur = startPt || rem[0];
+  if(!startPt){ path.push(rem.shift()); cur = path[0]; }
+  while(rem.length){
+    let bi = 0, bd = Infinity;
+    rem.forEach((s, i) => { const d = legMinutes(cur, s, false); if(d < bd){ bd = d; bi = i; } });
+    cur = rem.splice(bi, 1)[0];
+    path.push(cur);
+  }
+  const head = startPt ? null : path.shift();     // a free start keeps its first pick fixed
+  const at = i => i < 0 ? (startPt || head) : (i >= path.length ? endPt : path[i]);
+  const cost = (i, j) => {
+    const a = at(i), b = at(j);
+    return (a && b) ? legMinutes(a, b, false) : 0;
+  };
+  twoOpt(path, cost);
+  return head ? [head, ...path] : path;
+}
+
 /* Assign all movable stops across the trip's days and order every day.
    Returns {orders: {dayId: [ids]}} without mutating the trip. */
 export function autoPlanOrders(trip){
@@ -122,11 +189,8 @@ export function autoPlanOrders(trip){
   const k = days.length;
   const stopOf = id => trip.stops[id];
 
-  // Partition each day's current stops: no-coordinate stops stay put (front),
-  // anchored coordinate stops (flights/trains/boats/check-ins) pin the day and
-  // keep their relative order, everything else is movable.
   const fixedNoCoord = days.map(d => d.order.filter(id => { const s = stopOf(id); return !s || s.lat == null; }));
-  const fixedCoord = days.map(d => d.order.map(stopOf).filter(s => s && s.lat != null && ANCHOR_CATS.includes(s.cat)));
+  const anchorsByDay = days.map(d => d.order.map(stopOf).filter(s => s && s.lat != null && ANCHOR_CATS.includes(s.cat)));
   const movable = [];
   days.forEach(d => d.order.forEach(id => {
     const s = stopOf(id);
@@ -137,234 +201,231 @@ export function autoPlanOrders(trip){
     return { orders: Object.fromEntries(days.map(d => [d.id, d.order.slice()])) };
   }
 
-  const budgets = days.map(d => Math.max(240, DAY_END_MIN - parseTime(d.start)));
-
-  // Hotel bookend endpoints per day (participate in route cost + budget).
-  const ends = days.map(d => {
-    const h = getHotel(trip, d);
-    const usable = h && h.lat != null;
-    const be = d.bookend || 'both';
-    return {
-      start: usable && be !== 'end' ? { lat: h.lat, lng: h.lng, __h: true } : null,
-      end: usable && be !== 'start' ? { lat: h.lat, lng: h.lng, __h: true } : null,
-      boat: !!(h && h.mode === 'boat'),
-    };
-  });
-
-  /* ---- seeds: where each day "lives".
-     Anchored days seed at their anchors (immovable — a Murano boat day IS a
-     Murano day). Hotel days seed at the hotel; unseeded days spread by
-     farthest-point over the stops. Then a load pass: while one seed's area
-     is overfull and another day is nearly idle, the idle day's seed moves
-     into the overloaded area — dense areas get more days. ---- */
-  const seeds = days.map((d, i) => {
-    if(fixedCoord[i].length) return { ...centroid(fixedCoord[i]), anchored: true };
-    if(ends[i].start) return { lat: ends[i].start.lat + i * 1e-3, lng: ends[i].start.lng + i * 1e-3, anchored: false };
-    return null;
-  });
-  seeds.forEach((seed, i) => {
-    if(seed) return;
-    const placed = seeds.filter(Boolean);
-    let best = movable[0], bd = -1;
-    movable.forEach(m => {
-      const dmin = placed.length ? Math.min(...placed.map(o => haversineKm(o.lat, o.lng, m.lat, m.lng))) : 1;
-      if(dmin > bd){ bd = dmin; best = m; }
-    });
-    seeds[i] = { lat: best.lat, lng: best.lng, anchored: false };
-  });
-
-  // A day's seed may only live where that day's hotel can plausibly serve —
-  // you sleep there, so a Rome-hotel day must not become a Venice day.
-  const hotelPos = days.map((d, i) => ends[i].start || ends[i].end || null);
-  const seedAllowed = (i, pt) => !hotelPos[i] || haversineKm(hotelPos[i].lat, hotelPos[i].lng, pt.lat, pt.lng) < 60;
-
-  for(let iter = 0; iter < k * 2; iter++){
-    const load = days.map((d, i) => fixedCoord[i].reduce((n, s) => n + s.dur, 0));
-    movable.forEach(m => {
-      let bi = 0, bd = Infinity;
-      seeds.forEach((s, i) => { const d = haversineKm(s.lat, s.lng, m.lat, m.lng); if(d < bd){ bd = d; bi = i; } });
-      load[bi] += m.dur + 20;   // +20: rough per-stop travel overhead
-    });
-    let over = -1;
-    days.forEach((d, i) => {
-      if(load[i] > budgets[i] * 1.15 && (over === -1 || load[i] - budgets[i] > load[over] - budgets[over])) over = i;
-    });
-    if(over === -1) break;
-    const members = movable.filter(m => {
-      let bi = 0, bd = Infinity;
-      seeds.forEach((s, i) => { const d = haversineKm(s.lat, s.lng, m.lat, m.lng); if(d < bd){ bd = d; bi = i; } });
-      return bi === over;
-    });
-    if(!members.length) break;
-    let far = members[0], fd = -1;
-    members.forEach(m => { const d = haversineKm(seeds[over].lat, seeds[over].lng, m.lat, m.lng); if(d > fd){ fd = d; far = m; } });
-    let under = -1;
-    days.forEach((d, i) => {
-      if(i === over || seeds[i].anchored || !seedAllowed(i, far)) return;
-      if(load[i] < budgets[i] * 0.4 && (under === -1 || load[i] < load[under])) under = i;
-    });
-    if(under === -1) break;
-    seeds[under] = { lat: far.lat, lng: far.lng, anchored: false };
-  }
-
-  /* ---- cheapest insertion with budgets ---- */
-  const routes = days.map((d, i) => fixedCoord[i].slice());
-  const used = days.map((d, i) =>
-    fixedCoord[i].reduce((n, s) => n + s.dur, 0) +
-    fixedNoCoord[i].reduce((n, id) => n + ((stopOf(id) || {}).dur || 0), 0));
-
-  const leg = (i, a, b) => {
-    if(!a || !b) return 0;
-    return legMinutes(a, b, ends[i].boat && (a.__h || b.__h));
-  };
-  const routePts = i => [ends[i].start, ...routes[i], ends[i].end].filter(Boolean);
-  const routeTravel = i => {
-    const p = routePts(i);
-    let m = 0;
-    for(let j = 1; j < p.length; j++) m += leg(i, p[j-1], p[j]);
+  // Day budgets: waking window minus the immovable anchors' own time.
+  const anchorMinutes = anchorsByDay.map(list => {
+    let m = list.reduce((n, s) => n + s.dur, 0);
+    for(let i = 1; i < list.length; i++) m += legMinutes(list[i-1], list[i], false);
     return m;
-  };
-  const travel = days.map((d, i) => routeTravel(i));
-
-  // Best gap (by added minutes) for stop s in day i. Gap g means "before the
-  // g-th entry of routes[i]" — anchored stops never reorder.
-  const insertionCost = (i, s) => {
-    const off = ends[i].start ? 1 : 0;
-    const p = routePts(i);
-    let best = Infinity, bestPos = 0;
-    for(let g = 0; g <= routes[i].length; g++){
-      const before = (g + off - 1) >= 0 ? p[g + off - 1] : null;
-      const after = (g + off) < p.length ? p[g + off] : null;
-      const added = leg(i, before, s) + leg(i, s, after) - leg(i, before, after);
-      if(added < best){ best = added; bestPos = g; }
-    }
-    return { cost: best === Infinity ? 0 : best, pos: bestPos };
-  };
-
-  // Hardest stops first: the farther a stop is from every seed, the fewer
-  // good homes it has — place those while there's still room.
-  const orderIdx = movable.map((m, mi) => mi).sort((a, b) => {
-    const near = mi => Math.min(...seeds.map(s => haversineKm(s.lat, s.lng, movable[mi].lat, movable[mi].lng)));
-    return near(b) - near(a);
   });
+  const budgets = days.map((d, i) => Math.max(120, DAY_END_MIN - parseTime(d.start) - anchorMinutes[i]));
+  // ~10.5h TOTAL activity target: a day already carrying a 4h train + check-in
+  // has correspondingly little comfortable room left for sightseeing.
+  const comfort = budgets.map((b, i) => Math.max(120, Math.min(b, 630 - anchorMinutes[i])));
 
-  // A day CAN run to the 22:30 ceiling, but nobody wants every day maxed out.
-  // Insertion prefers days under a comfortable ~11h of activity and, among
-  // geographically-equivalent days, the emptier one — so load spreads across
-  // the days available instead of packing early days to the ceiling.
-  const comfort = days.map((d, i) => Math.min(budgets[i], 660));
-
-  const dayOf = new Array(movable.length).fill(-1);
-  orderIdx.forEach(mi => {
-    const s = movable[mi];
-    let best = null;
-    days.forEach((d, i) => {
-      const near = haversineKm(seeds[i].lat, seeds[i].lng, s.lat, s.lng);
-      const { cost, pos } = insertionCost(i, s);
-      const projected = used[i] + travel[i] + cost + s.dur;
-      const fits = projected <= budgets[i];
-      const score = cost + near * 2                     // ~2 min/km: the geographically-right day dominates
-        + (used[i] + travel[i]) * 0.25                  // mild pull toward emptier days
-        + Math.max(0, projected - comfort[i]) * 2;      // strong pushback past a comfortable day length
-      if(fits && (!best || score < best.score)) best = { i, pos, cost, score };
-    });
-    if(!best){
-      // Nothing has room: least-bad nearby day (≤60 km), else most slack anywhere.
-      let cands = days.map((d, i) => i).filter(i => haversineKm(seeds[i].lat, seeds[i].lng, s.lat, s.lng) < 60);
-      if(!cands.length) cands = days.map((d, i) => i);
-      let bi = cands[0], bs = -Infinity;
-      cands.forEach(i => { const slack = budgets[i] - used[i] - travel[i]; if(slack > bs){ bs = slack; bi = i; } });
-      const { pos } = insertionCost(bi, s);
-      best = { i: bi, pos };
-    }
-    routes[best.i].splice(best.pos, 0, s);
-    dayOf[mi] = best.i;
-    used[best.i] += s.dur;
-    travel[best.i] = routeTravel(best.i);
-  });
-
-  /* ---- improvement sweeps: move stops between days when it genuinely
-     saves travel and fits; then re-slot each stop within its day ---- */
-  for(let sweep = 0; sweep < 2; sweep++){
-    movable.forEach((s, mi) => {
-      const from = dayOf[mi];
-      const idx = routes[from].indexOf(s);
-      if(idx === -1) return;
-      routes[from].splice(idx, 1);
-      const removedTravel = routeTravel(from);
-      const saving = travel[from] - removedTravel;
-      let best = null;
-      days.forEach((d, i) => {
-        if(i === from) return;
-        const { cost, pos } = insertionCost(i, s);
-        const fits = used[i] + travel[i] + cost + s.dur <= budgets[i];
-        if(fits && cost < saving - 8 && (!best || cost < best.cost)) best = { i, pos, cost };
-      });
-      if(best){
-        routes[best.i].splice(best.pos, 0, s);
-        used[from] -= s.dur; used[best.i] += s.dur;
-        travel[from] = removedTravel; travel[best.i] = routeTravel(best.i);
-        dayOf[mi] = best.i;
-      } else {
-        routes[from].splice(idx, 0, s);
+  /* ---- 1. micro-neighbourhoods ---- */
+  const NEIGH_KM = 0.8;
+  const hoodOf = new Array(movable.length).fill(-1);
+  let H = 0;
+  for(let i = 0; i < movable.length; i++){
+    if(hoodOf[i] !== -1) continue;
+    const stack = [i];
+    hoodOf[i] = H;
+    while(stack.length){
+      const a = stack.pop();
+      for(let b = 0; b < movable.length; b++){
+        if(hoodOf[b] === -1 && haversineKm(movable[a].lat, movable[a].lng, movable[b].lat, movable[b].lng) <= NEIGH_KM){
+          hoodOf[b] = H;
+          stack.push(b);
+        }
       }
-    });
-    days.forEach((d, i) => {
-      routes[i].slice().forEach(s => {
-        if(ANCHOR_CATS.includes(s.cat)) return;
-        const idx = routes[i].indexOf(s);
-        if(idx === -1) return;
-        routes[i].splice(idx, 1);
-        const { pos } = insertionCost(i, s);
-        routes[i].splice(pos, 0, s);
-      });
-      travel[i] = routeTravel(i);
-    });
+    }
+    H++;
+  }
+  const makeHood = stops => ({ stops, c: centroid(stops), minutes: hoodMinutes(stops) });
+  let hoods = [];
+  for(let h = 0; h < H; h++) hoods.push(makeHood(movable.filter((m, i) => hoodOf[i] === h)));
+
+  // Split oversized neighbourhoods along their walking chain. The threshold
+  // is ~half a day, not a whole one: half-day chunks pack flexibly (two can
+  // share a day, one can top up an anchored day), where near-day-sized
+  // blocks jam the packing and pile onto whichever day has to take them.
+  const maxComfort = Math.max(...comfort);
+  let guard = 0;
+  while(guard++ < 60){
+    const idx = hoods.findIndex(h => h.stops.length > 1 && h.minutes > maxComfort * 0.55);
+    if(idx === -1) break;
+    const ordered = chainOrder(hoods[idx].stops);
+    let acc = 0, cut = 1;
+    const target = hoods[idx].minutes / 2;
+    for(let i = 0; i < ordered.length - 1; i++){
+      acc += ordered[i].dur + legMinutes(ordered[i], ordered[i+1], false);
+      if(acc >= target){ cut = i + 1; break; }
+    }
+    hoods.splice(idx, 1, makeHood(ordered.slice(0, cut)), makeHood(ordered.slice(cut)));
   }
 
-  /* ---- balance sweep: even out day loads within each area. Insertion is
-     greedy in sequence, so early days end up fuller than late ones; keep
-     moving the cheapest stop from the fullest day to the emptiest nearby
-     day until no pair differs by more than ~2.5h. ---- */
-  const loadOf = i => used[i] + travel[i];
-  for(let pass = 0; pass < movable.length; pass++){
-    const byLoad = days.map((d, i) => i).sort((a, b) => loadOf(b) - loadOf(a));
-    let applied = false;
-    for(const hi of byLoad){
-      let lo = -1;
-      days.forEach((d, i) => {
-        if(i === hi) return;
-        if(haversineKm(seeds[hi].lat, seeds[hi].lng, seeds[i].lat, seeds[i].lng) > 60) return;
-        if(lo === -1 || loadOf(i) < loadOf(lo)) lo = i;
-      });
-      if(lo === -1 || loadOf(hi) - loadOf(lo) <= 150) continue;
-      let best = null;
-      routes[hi].slice().forEach(s => {
-        if(ANCHOR_CATS.includes(s.cat)) return;
-        const idx = routes[hi].indexOf(s);
-        routes[hi].splice(idx, 1);
-        const removedTravel = routeTravel(hi);
-        const { cost, pos } = insertionCost(lo, s);
-        const fits = used[lo] + travel[lo] + cost + s.dur <= budgets[lo];
-        if(fits && (!best || cost < best.cost)) best = { s, idx, cost, pos, removedTravel };
-        routes[hi].splice(idx, 0, s);
-      });
-      if(!best) continue;
-      routes[hi].splice(best.idx, 1);
-      used[hi] -= best.s.dur;
-      travel[hi] = best.removedTravel;
-      routes[lo].splice(best.pos, 0, best.s);
-      used[lo] += best.s.dur;
-      travel[lo] = routeTravel(lo);
-      const mi = movable.indexOf(best.s);
-      if(mi !== -1) dayOf[mi] = lo;
-      applied = true;
-      break;
+  /* ---- 2. regions (areas ~50 km apart are different cities) ---- */
+  const regionOfHood = new Array(hoods.length).fill(-1);
+  let R = 0;
+  for(let i = 0; i < hoods.length; i++){
+    if(regionOfHood[i] !== -1) continue;
+    const stack = [i];
+    regionOfHood[i] = R;
+    while(stack.length){
+      const a = stack.pop();
+      for(let b = 0; b < hoods.length; b++){
+        if(regionOfHood[b] === -1 && haversineKm(hoods[a].c.lat, hoods[a].c.lng, hoods[b].c.lat, hoods[b].c.lng) < 50){
+          regionOfHood[b] = R;
+          stack.push(b);
+        }
+      }
     }
-    if(!applied) break;
+    R++;
   }
+
+  /* ---- 3a. anchored days claim their nearest neighbourhoods.
+     Claims resolve globally by distance to the day's NEAREST anchor —
+     the day whose boat actually docks at Murano gets the Murano
+     neighbourhood, even if an earlier day's anchors are vaguely close. ---- */
+  const claimedBy = new Array(hoods.length).fill(-1);
+  const dayLoad = new Array(k).fill(0);
+  const claims = [];
+  days.forEach((d, i) => {
+    if(!anchorsByDay[i].length) return;
+    hoods.forEach((h, hi) => {
+      const dist = Math.min(...anchorsByDay[i].map(a => haversineKm(a.lat, a.lng, h.c.lat, h.c.lng)));
+      if(dist < 10) claims.push({ i, hi, dist });
+    });
+  });
+  claims.sort((a, b) => a.dist - b.dist);
+  claims.forEach(({ i, hi, dist }) => {
+    if(claimedBy[hi] !== -1) return;
+    if(dayLoad[i] + hoods[hi].minutes > comfort[i]) return;
+    claimedBy[hi] = i;
+    dayLoad[i] += hoods[hi].minutes;
+  });
+
+  /* ---- 3b. free days split among regions by load; chain-pack per region ---- */
+  const freeDays = days.map((d, i) => i).filter(i => !anchorsByDay[i].length);
+  const regionLoad = new Array(R).fill(0);
+  hoods.forEach((h, hi) => { if(claimedBy[hi] === -1) regionLoad[regionOfHood[hi]] += h.minutes; });
+
+  // Order regions by where they sit in the ORIGINAL trip, so free days keep
+  // the trip's chronology (Rome days stay early, Venice days stay late).
+  const regionAvgIdx = new Array(R).fill(0).map((_, r) => {
+    let sum = 0, n = 0;
+    days.forEach((d, di) => d.order.forEach(id => {
+      const s = stopOf(id);
+      if(!s || s.lat == null) return;
+      const mi = movable.indexOf(s);
+      if(mi !== -1 && regionOfHood[hoodOf[mi]] === r){ sum += di; n++; }
+    }));
+    return n ? sum / n : 999;
+  });
+
+  const totalLoad = regionLoad.reduce((a, b) => a + b, 0) || 1;
+  const quota = regionLoad.map(l => l > 0 ? Math.max(1, Math.round(freeDays.length * l / totalLoad)) : 0);
+  let excess = quota.reduce((a, b) => a + b, 0) - freeDays.length;
+  while(excess > 0){ const r = quota.indexOf(Math.max(...quota)); quota[r]--; excess--; }
+  while(excess < 0){ const r = regionLoad.indexOf(Math.max(...regionLoad.filter((l, ri) => quota[ri] >= 0))); quota[r]++; excess++; }
+
+  const regionOrder = quota.map((q, r) => r).filter(r => quota[r] > 0).sort((a, b) => regionAvgIdx[a] - regionAvgIdx[b]);
+  const daysOfRegion = new Map();
+  let cursor = 0;
+  regionOrder.forEach(r => {
+    daysOfRegion.set(r, freeDays.slice(cursor, cursor + quota[r]));
+    cursor += quota[r];
+  });
+
+  regionOrder.forEach(r => {
+    const rDays = daysOfRegion.get(r);
+    if(!rDays.length) return;
+    let pool = hoods.map((h, hi) => hi).filter(hi => claimedBy[hi] === -1 && regionOfHood[hi] === r);
+    if(!pool.length) return;
+    // Pack toward the region's per-day average, so the walking chain fills
+    // each day evenly instead of piling everything left over onto the last.
+    const totalR = pool.reduce((n, hi) => n + hoods[hi].minutes, 0);
+    const target = totalR / rDays.length;
+    // chain from an edge of the region: start at the hood farthest from the centre
+    const rc = centroid(pool.map(hi => hoods[hi].c));
+    let di = 0;
+    let current = pool.reduce((best, hi) =>
+      haversineKm(rc.lat, rc.lng, hoods[hi].c.lat, hoods[hi].c.lng) >
+      haversineKm(rc.lat, rc.lng, hoods[best].c.lat, hoods[best].c.lng) ? hi : best, pool[0]);
+    while(pool.length){
+      let day = rDays[Math.min(di, rDays.length - 1)];
+      const cap = Math.min(comfort[day], Math.max(target * 1.2, hoods[current].minutes));
+      if(dayLoad[day] > 0 && dayLoad[day] + hoods[current].minutes > cap){
+        if(di < rDays.length - 1){ di++; continue; }
+        // past the last day: least-loaded day in the region takes it
+        day = rDays.reduce((b, i) => dayLoad[i] < dayLoad[b] ? i : b, rDays[0]);
+      }
+      claimedBy[current] = day;
+      dayLoad[day] += hoods[current].minutes;
+      pool = pool.filter(hi => hi !== current);
+      if(!pool.length) break;
+      const from = hoods[current].c;
+      current = pool.reduce((best, hi) =>
+        haversineKm(from.lat, from.lng, hoods[hi].c.lat, hoods[hi].c.lng) <
+        haversineKm(from.lat, from.lng, hoods[best].c.lat, hoods[best].c.lng) ? hi : best, pool[0]);
+    }
+  });
+
+  // Safety net: anything still unclaimed (region with zero quota, outliers)
+  // goes to the day with the most room that can plausibly host it.
+  hoods.forEach((h, hi) => {
+    if(claimedBy[hi] !== -1) return;
+    let best = -1;
+    days.forEach((d, i) => {
+      const near = anchorsByDay[i].length ? haversineKm(centroid(anchorsByDay[i]).lat, centroid(anchorsByDay[i]).lng, h.c.lat, h.c.lng) : 0;
+      if(near > 100) return;
+      if(best === -1 || (budgets[i] - dayLoad[i]) > (budgets[best] - dayLoad[best])) best = i;
+    });
+    if(best === -1) best = dayLoad.indexOf(Math.min(...dayLoad));
+    claimedBy[hi] = best;
+    dayLoad[best] += h.minutes;
+  });
+
+  /* ---- 4. in-day ordering: anchors hold position, movables fill the gaps ---- */
+  const dayMov = days.map(() => []);
+  hoods.forEach((h, hi) => { dayMov[claimedBy[hi]].push(...h.stops); });
 
   const orders = {};
-  days.forEach((d, i) => { orders[d.id] = [...fixedNoCoord[i], ...routes[i].map(s => s.id)]; });
+  days.forEach((d, i) => {
+    const anchors = anchorsByDay[i];
+    const movs = dayMov[i];
+    let seq;
+    if(!anchors.length){
+      seq = orderStops(movs, null, null);
+    } else {
+      // An anchor that opened the original day (check-in, arriving flight)
+      // should keep opening it; one that closed it (departure train) should
+      // keep closing it. Distances tie for the gaps either side of an
+      // anchor, so bias the gap that matches the anchor's original role.
+      const origLen = Math.max(1, d.order.length - 1);
+      const early = anchors.map(a => (d.order.indexOf(a.id) / origLen) < 0.5);
+      const gaps = anchors.length + 1;
+      // Nothing can happen before an anchor that OPENED the original day
+      // (you can't wander Venice before the train from Rome arrives), and
+      // nothing after one that CLOSED it (a departure flight ends the day).
+      const gapForbidden = new Array(gaps).fill(false);
+      if(d.order.indexOf(anchors[0].id) === 0) gapForbidden[0] = true;
+      if(d.order.indexOf(anchors[anchors.length - 1].id) === d.order.length - 1) gapForbidden[gaps - 1] = true;
+      const firstAllowed = gapForbidden.findIndex(f => !f);
+      const gapStops = Array.from({ length: gaps }, () => []);
+      movs.forEach(s => {
+        let bg = firstAllowed === -1 ? 0 : firstAllowed, bd = Infinity;
+        for(let g = 0; g < gaps; g++){
+          if(gapForbidden[g]) continue;
+          const prev = g > 0 ? anchors[g - 1] : null;
+          const next = g < anchors.length ? anchors[g] : null;
+          let dd = Math.min(prev ? legMinutes(prev, s, false) : Infinity,
+                            next ? legMinutes(s, next, false) : Infinity);
+          if(next && early[g]) dd += 0.5;            // tie-break: don't slot before a day-opening anchor
+          if(prev && !early[g - 1]) dd += 0.5;       // tie-break: don't slot after a day-closing anchor
+          if(dd < bd){ bd = dd; bg = g; }
+        }
+        gapStops[bg].push(s);
+      });
+      seq = [];
+      for(let g = 0; g < gaps; g++){
+        const prev = g > 0 ? anchors[g - 1] : null;
+        const next = g < anchors.length ? anchors[g] : null;
+        seq.push(...orderStops(gapStops[g], prev, next));
+        if(next) seq.push(next);
+      }
+    }
+    orders[d.id] = [...fixedNoCoord[i], ...seq.map(s => s.id)];
+  });
   return { orders };
 }

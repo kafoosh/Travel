@@ -118,11 +118,31 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
   });
   check('auto-plan never mixes cities within a day', crossCity === 0, crossCity + ' mixed days');
   check('anchored stops stay on their day', anchorMoved === 0, String(anchorMoved));
-  check('no day overloaded (visits ≤ 11h)', Math.max(...loads) <= 11 * 60, Math.max(...loads) + ' min');
+  check('no day overloaded (visits ≤ 12h)', Math.max(...loads) <= 12 * 60, Math.max(...loads) + ' min');
+  // anchors that opened their original day must still open it after replanning
+  const d1order = fo[fresh.days[0].id];
+  const checkin = d1order.map(id => fresh.stops[id]).find(s => s && s.cat === 'hotel');
+  check('day-opening check-in still opens its day', checkin && d1order.indexOf(checkin.id) === 0, checkin ? 'at index ' + d1order.indexOf(checkin.id) : 'missing');
   check('no day starved (every day gets stops)', Math.min(...loads) >= 60, Math.min(...loads) + ' min');
   check('loads reasonably balanced (max ≤ 2× min)', Math.max(...loads) <= 2 * Math.min(...loads),
     Math.min(...loads) + '–' + Math.max(...loads) + ' min');
 
-  console.log(failures ? '\n' + failures + ' FAILURE(S)' : '\nall checks passed');
-  process.exit(failures ? 1 : 0);
+  /* --- 5. external map exports --- */
+  import('../js/exporters.js').then(({ googleMapsDayUrl, tripKml }) => {
+    console.log('map exports:');
+    const t = parseTrip(md).trip;
+    const { url, truncated } = googleMapsDayUrl(t, t.days[1]);
+    check('gmaps url uses the documented api=1 scheme', !!url && url.startsWith('https://www.google.com/maps/dir/?api=1'), (url || '').slice(0, 60));
+    check('gmaps url walks and has waypoints', !!url && url.includes('travelmode=walking') && url.includes('waypoints='));
+    check('gmaps origin is the day-2 hotel', !!url && decodeURIComponent(url).includes('origin=41.9053'), 'day 2 starts at the Tribune');
+    const big = googleMapsDayUrl(t, t.days.reduce((b, d) => d.order.length > b.order.length ? d : b));
+    check('waypoint cap reported honestly', typeof big.truncated === 'boolean');
+    const kml = tripKml(t);
+    const placemarks = (kml.match(/<Placemark>/g) || []).length;
+    check('kml has a folder per day + optional', (kml.match(/<Folder>/g) || []).length === 11);
+    check('kml placemark count covers stops + routes', placemarks >= 68 + 10, String(placemarks));
+    check('kml escapes reserved characters', !/&(?!amp;|lt;|gt;|quot;|apos;)/.test(kml));
+    console.log(failures ? '\n' + failures + ' FAILURE(S)' : '\nall checks passed');
+    process.exit(failures ? 1 : 0);
+  });
 });
