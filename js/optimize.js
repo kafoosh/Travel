@@ -59,21 +59,23 @@ function twoOpt(order, cost){
    coordinates keep their relative position at the front (they cost nothing). */
 export function optimizeDayOrder(trip, day){
   const hotel = getHotel(trip, day);
+  const bookend = day.bookend || 'both';
   const boat = !!(hotel && hotel.mode === 'boat');
   const stops = day.order.map(id => trip.stops[id]).filter(Boolean);
   const noCoord = stops.filter(s => s.lat == null);
   const withCoord = stops.filter(s => s.lat != null);
   if(withCoord.length < 2) return day.order.slice();
 
+  const hotelUsable = hotel && hotel.lat != null;
   let anchor;         // fixed start point
   let fixedFirst = null;
-  if(hotel && hotel.lat != null){
+  if(hotelUsable && bookend !== 'end'){
     anchor = { lat: hotel.lat, lng: hotel.lng };
   } else {
-    fixedFirst = withCoord.shift();      // no hotel: first stop stays first
+    fixedFirst = withCoord.shift();      // day doesn't start at a hotel: first stop stays first
     anchor = fixedFirst;
   }
-  const endPoint = (hotel && hotel.lat != null) ? anchor : null; // return to hotel if set
+  const endPoint = (hotelUsable && bookend !== 'start') ? { lat: hotel.lat, lng: hotel.lng } : null;
 
   // Nearest-neighbour construction
   const remaining = withCoord.slice();
@@ -134,7 +136,7 @@ export function distributeAcrossDays(trip){
   const k = days.length;
   // Travel legs, boat/ferry rides, and hotel check-ins anchor the day they're
   // on — redistributing those would wreck arrival days and island day-trips.
-  const ANCHOR_CATS = ['travel', 'boat', 'hotel'];
+  const ANCHOR_CATS = ['travel', 'boat', 'hotel', 'flight'];
   const fixedByDay = days.map(d => d.order.filter(id => {
     const s = trip.stops[id];
     return !s || s.lat == null || ANCHOR_CATS.includes(s.cat);

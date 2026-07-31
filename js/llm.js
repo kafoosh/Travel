@@ -42,16 +42,24 @@ FORMAT SPECIFICATION
 ## Day 1: <short day title, e.g. "Ancient Rome">
 - start: <HH:MM 24h, e.g. 09:00>
 - hotel: <exact hotel name from the Hotels section, or "none">
+- hotel bookend: <optional: "both" (default — day starts and ends at the hotel) | "start" | "end" (e.g. an arrival day that only ENDS at the hotel)>
 
 ### <location name>
 - lat: <decimal latitude — REQUIRED, as accurate as you can>
 - lng: <decimal longitude — REQUIRED>
-- category: <one of: landmark | museum | church | park | view | food | shop | hotel | travel | boat | other>
+- category: <one of: landmark | museum | church | park | view | food | shop | hike | hotel | flight | travel | boat | other>
 - duration: <realistic visit length in minutes>
+- fixed start: <optional HH:MM for things pinned to a clock: flight landing/boarding time, train departure, timed museum entry. The schedule waits for it and flags conflicts.>
 - image: <public image URL, optional — prefer Wikimedia Commons: https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200>
 - description: <1–2 sentences: what it is and one practical tip (booking, timing, closures)>
 - detail: <2–4 sentences of history or a great story — the kind of thing a knowledgeable friend would tell you standing in front of it>
 - tags: <optional comma-separated labels, e.g. a theme the trip follows>
+
+For a point-to-point hike (category "hike"), also give where it ends — travel to the next stop continues from there:
+- end lat: <decimal latitude of the trailhead where the hike finishes>
+- end lng: <decimal longitude>
+
+Arrival/departure days: model the flight or train as its own stop — category "flight" or "travel", at the airport/station coordinates, with "fixed start" as the landing or departure time and "duration" covering deplaning/immigration/luggage (arrivals) or the arrive-early buffer (departures). Give such days "- hotel bookend: end" (arrival) or "start" (departure).
 
 (Repeat "## Day N: …" for every day. Include meals as category "food" stops with real restaurant recommendations. 4–8 stops per day is a realistic pace; do not overpack. Order each day's stops geographically so the day flows without backtracking.)
 

@@ -8,19 +8,34 @@
 
 import { blankTrip, isValidTrip } from './format.js';
 
-const STORAGE_KEY = 'travelPlanner_v1';
+/* Persistence model: a trip is only SAVED once it's shared.
+   - Unshared work-in-progress lives in sessionStorage: an accidental reload
+     keeps it, but the bare URL in a fresh tab always opens a blank trip —
+     so anyone can come back to the site and start a new one.
+   - A shared room (#trip=code in the URL) caches per room code in
+     localStorage, for instant loads and offline fallback; Firestore is the
+     real copy. */
+const DRAFT_KEY = 'travelPlanner_draft_v1';
+const ROOM_PREFIX = 'travelPlanner_room_';
+
+function currentRoomCode(){
+  const m = /[#&]trip=([a-z0-9]{12,40})/.exec(location.hash || '');
+  return m ? m[1] : null;
+}
 
 export const state = {
   trip: blankTrip(),
   currentDayIndex: 0,
-  currentView: 'days',    // 'days' | 'bin' | 'optional' | 'info'
+  currentView: 'days',    // 'days' | 'all' | 'bin' | 'optional' | 'info'
   mobilePane: 'list',
   undoStack: [],
 };
 
 export function loadState(){
+  try{ localStorage.removeItem('travelPlanner_v1'); } catch(e){}   // pre-share-model key
   try{
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const code = currentRoomCode();
+    const raw = code ? localStorage.getItem(ROOM_PREFIX + code) : sessionStorage.getItem(DRAFT_KEY);
     if(raw){
       const saved = JSON.parse(raw);
       if(isValidTrip(saved.trip)) state.trip = normalizeTrip(saved.trip);
@@ -36,7 +51,9 @@ export function normalizeTrip(t){
   trip.info = { ...base.info, ...(t.info || {}) };
   trip.days = (t.days || []).map((d, i) => ({
     id: i + 1, title: d.title || ('Day ' + (i + 1)), start: d.start || '09:00',
-    hotelId: d.hotelId || null, order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
+    hotelId: d.hotelId || null,
+    bookend: ['start','end'].includes(d.bookend) ? d.bookend : 'both',
+    order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
   }));
   if(!trip.days.length) trip.days = base.days;
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
@@ -54,7 +71,10 @@ export function normalizeTrip(t){
    device uses this rather than saveState(), so it doesn't bounce back out. */
 export function persistLocal(){
   try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ trip: state.trip }));
+    const payload = JSON.stringify({ trip: state.trip });
+    const code = currentRoomCode();   // checked live: sharing mid-session moves saves to the room key
+    if(code) localStorage.setItem(ROOM_PREFIX + code, payload);
+    else sessionStorage.setItem(DRAFT_KEY, payload);
   } catch(e){ console.warn('Could not save trip', e); }
 }
 

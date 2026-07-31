@@ -173,6 +173,6 @@ export function cloudStatusText(){
     const t = cloud.lastSync ? new Date(cloud.lastSync).toLocaleTimeString() : '';
     return (cloud.note ? cloud.note + ' · ' : '') + 'Shared and syncing' + (t ? ' · last change ' + t : '') + '.';
   }
-  if(!cloud.configured) return 'Sharing is not set up on this deployment yet — the trip is saved in this browser only. (One-time setup in the README.)';
-  return 'This trip is saved in this browser only.';
+  if(!cloud.configured) return 'Sharing is not set up on this deployment yet — this trip lives in this browser tab only. (One-time setup in the README.)';
+  return 'This trip lives in this browser tab only — create a share link to save it and get a URL you can come back to.';
 }

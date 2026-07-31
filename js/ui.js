@@ -18,12 +18,14 @@ import { attachAutocomplete } from './geocode.js';
 
 const ICONS = {
   landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
-  food:'🍝', view:'🌇', travel:'🚄', shop:'🛍️', hotel:'🛏️', boat:'🚤', other:'📍'
+  food:'🍝', view:'🌇', travel:'🚄', shop:'🛍️', hike:'🥾',
+  hotel:'🛏️', flight:'✈️', boat:'🚤', other:'📍'
 };
 const CAT_LABEL = {
   landmark:'Landmark', museum:'Museum', church:'Church / temple', park:'Park / nature',
-  view:'Viewpoint', food:'Food & drink', shop:'Shopping', hotel:'Hotel / check-in',
-  travel:'Travel leg (train, flight…)', boat:'Boat / ferry', other:'Other'
+  view:'Viewpoint', food:'Food & drink', shop:'Shopping', hike:'Hike (A → B)',
+  hotel:'Hotel / check-in', flight:'Flight', travel:'Train / travel leg',
+  boat:'Boat / ferry', other:'Other'
 };
 const MODE_ICON = { walk:'🚶', transit:'🚌', taxi:'🚕', boat:'🚤' };
 const MODE_LABEL = { walk:'walk', transit:'transit', taxi:'taxi', boat:'boat shuttle' };
@@ -224,6 +226,12 @@ function renderScheduleList(day, sched){
     if(idx > 0 && row.travelBefore > 0){
       list.appendChild(travelConnector(row.travelBefore, row.travelMode || 'walk', row.travelLive));
     }
+    if(row.waitBefore > 0){
+      const wait = document.createElement('div');
+      wait.className = 'travel-connector';
+      wait.innerHTML = '⏳ ' + row.waitBefore + ' min spare before the fixed ' + formatTime(parseTimeStr(row.stop.fixedStart)) + ' start';
+      list.appendChild(wait);
+    }
 
     const s = row.stop;
     const card = document.createElement('div');
@@ -255,6 +263,9 @@ function renderScheduleList(day, sched){
           <span class="clock">${formatTime(row.start)}</span>
           <span>·</span>
           <span>${formatDur(s.dur)}</span>
+          ${s.fixedStart ? `<span class="fixed-chip" title="Fixed start time">⏰ ${formatTime(parseTimeStr(s.fixedStart))}</span>` : ''}
+          ${row.late > 0 ? `<span class="late-chip" title="The plan reaches this stop after its fixed time">⚠ ${row.late} min late</span>` : ''}
+          ${s.cat === 'hike' && s.endLat != null ? `<span class="fixed-chip" title="Point-to-point hike">🥾 A→B</span>` : ''}
         </div>
         <p class="stop-name">${esc(s.name)}</p>
         <p class="stop-desc">${esc(s.desc)}</p>
@@ -399,6 +410,24 @@ function renderScheduleList(day, sched){
     arrive.innerHTML = '🏨 Back at the hotel ~' + formatTime(returnTime);
     list.appendChild(arrive);
   }
+
+  // Day totals: distance on foot vs by vehicle, from routed geometry where
+  // known and haversine-based estimates otherwise.
+  const { walkKm, otherKm } = sched;
+  if(walkKm > 0.05 || otherKm > 0.05){
+    const totals = document.createElement('div');
+    totals.className = 'day-totals';
+    const parts = [];
+    if(walkKm > 0.05) parts.push('🚶 ' + walkKm.toFixed(1) + ' km on foot');
+    if(otherKm > 0.05) parts.push('🚌 ' + otherKm.toFixed(1) + ' km by transit/taxi/boat');
+    totals.innerHTML = parts.join(' · ') + ' <span class="est-note">· estimated from routes</span>';
+    list.appendChild(totals);
+  }
+}
+
+function parseTimeStr(str){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(str || '');
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
 
 function shortTitle(t){ return t.length > 18 ? t.slice(0, 17) + '…' : t; }
@@ -532,6 +561,22 @@ function renderMap(day, sched){
     if(prevPt) segs.push({ from: prevPt, to: cur, path: row.travelPath });
     pts.push(cur);
     prevPt = cur;
+
+    // Point-to-point hike: draw the hike itself and continue from its end.
+    if(s.cat === 'hike' && s.endLat != null && s.endLng != null){
+      const end = [s.endLat, s.endLng];
+      const flagIcon = L.divIcon({
+        className: '',
+        html: '<div class="map-pin hike-end-pin"><span>🏁</span></div>',
+        iconSize: [26,26],
+        iconAnchor: [13,24]
+      });
+      L.marker(end, { icon: flagIcon }).addTo(leafletMap)
+        .bindPopup('<b>' + esc(s.name) + '</b><br>hike ends here');
+      segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: true });
+      pts.push(end);
+      prevPt = end;
+    }
   });
 
   if(hotel && hotel.lat != null && pts.length > 1){
@@ -541,14 +586,16 @@ function renderMap(day, sched){
 
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C1502E';
   const boundPts = pts.slice();
+  const gold = getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#B8891F';
   segs.forEach(seg => {
+    const color = seg.hike ? gold : accent;   // hikes draw in the accent-gold so they read as "on foot, on purpose"
     if(seg.path && seg.path.length > 1){
-      // Real routed geometry: solid line following the streets/canals.
-      L.polyline(seg.path, { color: accent, weight: 3.5, opacity: 0.85 }).addTo(leafletMap);
+      // Real routed geometry: solid line following the streets/canals/trails.
+      L.polyline(seg.path, { color, weight: 3.5, opacity: 0.85 }).addTo(leafletMap);
       boundPts.push(...seg.path);
     } else {
       // No routed shape (yet, or boat shuttle): dashed straight estimate.
-      L.polyline([seg.from, seg.to], { color: accent, weight: 3, dashArray: '6 6', opacity: 0.7 }).addTo(leafletMap);
+      L.polyline([seg.from, seg.to], { color, weight: 3, dashArray: '6 6', opacity: 0.7 }).addTo(leafletMap);
     }
   });
 
@@ -630,6 +677,25 @@ function whereIsStop(id){
   return 'bin';
 }
 
+/* Coordinates stay hidden while search can fill them; the status line shows
+   what's set, with a manual-entry escape hatch. */
+export function refreshCoordsStatus(){
+  const lat = $('al-lat').value.trim(), lng = $('al-lng').value.trim();
+  const st = $('al-coords-status');
+  if(lat && lng){
+    st.innerHTML = `✓ Coordinates: ${esc(lat)}, ${esc(lng)} — <button type="button" class="linklike" data-act="toggle">edit</button>`;
+  } else {
+    st.innerHTML = `No coordinates yet — pick a search suggestion above, or <button type="button" class="linklike" data-act="toggle">enter them manually</button>.`;
+  }
+  st.querySelector('[data-act="toggle"]').addEventListener('click', () => {
+    $('al-coords-wrap').classList.toggle('hidden');
+  });
+}
+
+function refreshHikeFields(){
+  $('al-end-wrap').classList.toggle('hidden', $('al-cat').value !== 'hike');
+}
+
 export function openLocationForm(editStopId, defaultDayId){
   const catSel = $('al-cat');
   catSel.innerHTML = CATEGORIES.map(c => `<option value="${c}">${CAT_LABEL[c]}</option>`).join('');
@@ -643,8 +709,12 @@ export function openLocationForm(editStopId, defaultDayId){
     $('al-name').value = s.name;
     catSel.value = s.cat;
     $('al-dur').value = s.dur;
+    $('al-fixed').value = s.fixedStart || '';
     $('al-lat').value = s.lat ?? '';
     $('al-lng').value = s.lng ?? '';
+    $('al-endlat').value = s.endLat ?? '';
+    $('al-endlng').value = s.endLng ?? '';
+    $('al-end-search').value = '';
     $('al-desc').value = s.desc || '';
     $('al-detail').value = s.detail || '';
     $('al-notes').value = s.notes || '';
@@ -656,6 +726,10 @@ export function openLocationForm(editStopId, defaultDayId){
     $('al-dur').value = 60;
     fillDaySelect($('al-day'), String(defaultDayId || currentDay().id));
   }
+
+  $('al-coords-wrap').classList.add('hidden');
+  refreshCoordsStatus();
+  refreshHikeFields();
 
   $('add-location-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
@@ -680,15 +754,19 @@ function submitLocationForm(e){
     return;
   }
   const cat = $('al-cat').value;
+  const endLat = cat === 'hike' ? parseFloat($('al-endlat').value) : NaN;
+  const endLng = cat === 'hike' ? parseFloat($('al-endlng').value) : NaN;
   pushUndo();
   const editId = $('al-editing').value;
   const id = editId || nextStopId();
-  const prev = editId ? trip().stops[editId] : null;
   trip().stops[id] = {
     id, name, cat,
     dur: parseInt($('al-dur').value, 10) || DEFAULT_DUR[cat] || 45,
     lat: (lat != null && lng != null) ? lat : null,
     lng: (lat != null && lng != null) ? lng : null,
+    endLat: (!isNaN(endLat) && !isNaN(endLng)) ? endLat : null,
+    endLng: (!isNaN(endLat) && !isNaN(endLng)) ? endLng : null,
+    fixedStart: /^\d{1,2}:\d{2}$/.test($('al-fixed').value) ? $('al-fixed').value : null,
     img: $('al-img').value.trim(),
     desc: $('al-desc').value.trim(),
     detail: $('al-detail').value.trim(),
@@ -725,6 +803,10 @@ function openDayEdit(dayIndex){
   sel.innerHTML = `<option value="">No hotel</option>` +
     trip().hotels.map(h => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join('');
   sel.value = day.hotelId || '';
+  $('de-bookend').value = day.bookend || 'both';
+  const syncBookendVisibility = () => $('de-bookend-label').classList.toggle('hidden', !sel.value);
+  sel.onchange = syncBookendVisibility;
+  syncBookendVisibility();
   $('day-edit-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -740,6 +822,7 @@ function submitDayEdit(e){
   day.title = $('de-title').value.trim() || day.title;
   day.start = $('de-start').value || day.start;
   day.hotelId = $('de-hotel').value || null;
+  day.bookend = ['start','end'].includes($('de-bookend').value) ? $('de-bookend').value : 'both';
   saveState();
   closeDayEdit();
   renderAll();
@@ -909,6 +992,108 @@ function renderBin(){
 }
 
 /* =========================================================
+   ALL STOPS VIEW — master list + group-by-proximity
+   ========================================================= */
+function allStopRow(id, fromDay, isOptional, optMeta){
+  const s = trip().stops[id];
+  if(!s) return null;
+  const row = document.createElement('div');
+  row.className = 'bin-row all-row';
+  const dayOptions = trip().days.map(d =>
+    `<option value="${d.id}" ${(!isOptional && fromDay && d.id === fromDay.id) ? 'selected' : (isOptional && optMeta && optMeta.day === d.id ? 'selected' : '')}>D${d.id} — ${esc(shortTitle(d.title))}</option>`).join('');
+  row.innerHTML = `
+    <div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>
+    <div class="stop-main">
+      <p class="stop-name">${esc(s.name)}${s.lat == null ? ' <span class="tag-chip" title="No coordinates">no coords</span>' : ''}</p>
+      <p class="stop-desc">${esc(s.desc || '')}</p>
+    </div>
+    <div class="manage-row">
+      ${isOptional
+        ? `<select class="restore-to-day">${dayOptions}</select><button class="restore-btn">+ Add</button>`
+        : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Optional</option></select>
+           <button class="bin-btn" title="Remove to bin">🗑</button>`}
+    </div>`;
+  row.querySelector('.stop-main').style.cursor = 'pointer';
+  row.querySelector('.stop-main').addEventListener('click', () => openModal(id, null));
+  if(isOptional){
+    row.querySelector('.restore-btn').addEventListener('click', () => {
+      moveToDay(null, id, parseInt(row.querySelector('.restore-to-day').value, 10));
+      renderAllStops();
+    });
+  } else {
+    row.querySelector('.move-to-day').addEventListener('change', e => {
+      const v = e.target.value;
+      if(v === 'optional') moveToOptional(fromDay, id);
+      else if(v) moveToDay(fromDay, id, parseInt(v, 10));
+      renderAllStops();
+    });
+    row.querySelector('.bin-btn').addEventListener('click', () => { removeToBin(fromDay, id); renderAllStops(); });
+  }
+  return row;
+}
+
+export function renderAllStops(){
+  const el = $('all-list');
+  if(!el) return;
+  el.innerHTML = '';
+  const t = trip();
+  if(!$('group-days').value || document.activeElement !== $('group-days')){
+    $('group-days').value = t.days.length;
+  }
+  t.days.forEach(d => {
+    const head = document.createElement('div');
+    head.className = 'all-day-head';
+    head.textContent = 'Day ' + d.id + ' — ' + d.title + ' (' + d.order.length + ')';
+    el.appendChild(head);
+    d.order.forEach(id => {
+      const row = allStopRow(id, d, false);
+      if(row) el.appendChild(row);
+    });
+  });
+  if(t.optional.length){
+    const head = document.createElement('div');
+    head.className = 'all-day-head';
+    head.textContent = 'Optional ideas (' + t.optional.length + ')';
+    el.appendChild(head);
+    t.optional.forEach(o => {
+      const row = allStopRow(o.id, null, true, o);
+      if(row) el.appendChild(row);
+    });
+  }
+  if(!el.children.length){
+    el.innerHTML = '<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">No locations yet — add some from a day panel, or import a trip in Trip Info.</p>';
+  }
+}
+
+function groupByProximity(){
+  const t = trip();
+  const n = Math.max(1, Math.min(60, parseInt($('group-days').value, 10) || t.days.length));
+  const includeOptional = $('group-include-optional').checked;
+  const total = t.days.reduce((s, d) => s + d.order.length, 0) + (includeOptional ? t.optional.length : 0);
+  if(total < 2){ alert('Add some locations first — there’s nothing to group yet.'); return; }
+  if(!confirm('Regroup ' + total + ' stops by proximity into ' + n + ' day(s), respecting each day’s time budget, then order each day? Undo can revert it.')) return;
+  pushUndo();
+  if(includeOptional){
+    t.optional.forEach(o => t.days[0].order.push(o.id));
+    t.optional = [];
+  }
+  if(n > t.days.length){
+    while(t.days.length < n) t.days.push(newDay(t.days.length + 1));
+  } else if(n < t.days.length){
+    const removed = t.days.slice(n);
+    removed.forEach(d => t.days[n - 1].order.push(...d.order));
+    t.days = t.days.slice(0, n);
+  }
+  t.days.forEach((d, i) => { d.id = i + 1; });
+  const { orders } = distributeAcrossDays(t);
+  t.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
+  state.currentDayIndex = 0;
+  saveState();
+  renderAll();
+  renderAllStops();
+}
+
+/* =========================================================
    TRIP INFO TAB
    ========================================================= */
 const INFO_CARDS = [
@@ -960,7 +1145,8 @@ export function renderInfo(){
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Share &amp; sync across devices</h3>
-      <p>Create a share link and this trip moves to the cloud. Open the link on your phone, or send it to whoever you're travelling with — everyone sees the same plan, and edits show up on the other devices within a second or two. No accounts: the link <i>is</i> the key. Nothing is uploaded until you create a link.</p>
+      <p>Create a share link and this trip moves to the cloud. Open the link on your phone, or send it to whoever you're travelling with — everyone sees the same plan, and edits show up on the other devices within a second or two. No accounts: the link <i>is</i> the key.</p>
+      <p><b>Sharing is also how a trip is saved.</b> An unshared trip lives only in this browser tab — nothing is uploaded, and closing the tab lets it go, so the bare site URL always opens a fresh blank trip. Share (or Export) anything you want to keep.</p>
       <p id="cloud-state" class="cloud-state"></p>
       <div id="cloud-link-row" class="cloud-link-row hidden">
         <input type="text" id="cloud-link" readonly aria-label="Share link" />
@@ -1209,7 +1395,7 @@ function clearTrip(){
    ========================================================= */
 export function setView(view){
   state.currentView = view;
-  ['days','bin','optional','info'].forEach(v => {
+  ['days','all','bin','optional','info'].forEach(v => {
     $('btn-view-' + v).classList.toggle('active', view === v);
     $('view-' + v).classList.toggle('hidden', view !== v);
   });
@@ -1218,6 +1404,7 @@ export function setView(view){
     leafletMap.invalidateSize();
     if(mapFitPending) fitMapToDay();
   }, 50);
+  if(view === 'all') renderAllStops();
   if(view === 'bin') renderBin();
   if(view === 'optional') renderOptional();
   if(view === 'info') renderInfo();
@@ -1247,15 +1434,22 @@ export function renderAll(){
   renderDayPanel();
   updateUndoButton();
   renderFooter();
+  if(state.currentView === 'all') renderAllStops();
   if(state.currentView === 'bin') renderBin();
   if(state.currentView === 'optional') renderOptional();
 }
 
 export function wireStaticHandlers(){
   $('btn-view-days').addEventListener('click', () => setView('days'));
+  $('btn-view-all').addEventListener('click', () => setView('all'));
   $('btn-view-bin').addEventListener('click', () => setView('bin'));
   $('btn-view-optional').addEventListener('click', () => setView('optional'));
   $('btn-view-info').addEventListener('click', () => setView('info'));
+  $('group-btn').addEventListener('click', groupByProximity);
+  $('add-optional-btn').addEventListener('click', () => openLocationForm(null, 'optional'));
+  $('al-cat').addEventListener('change', refreshHikeFields);
+  $('al-lat').addEventListener('input', refreshCoordsStatus);
+  $('al-lng').addEventListener('input', refreshCoordsStatus);
   $('btn-settings').addEventListener('click', openSettings);
   $('trip-title').addEventListener('click', openSettings);
   $('cloud-chip').addEventListener('click', () => setView('info'));
@@ -1319,12 +1513,24 @@ export function wireStaticHandlers(){
     }
   });
 
-  // place search: typing a name suggests real places and fills coordinates
+  // place search: typing a name suggests real places and fills coordinates.
+  // Coordinates stay hidden unless search fails (or the user asks for them).
   attachAutocomplete($('al-name'), (r) => {
     $('al-name').value = r.name;
     $('al-lat').value = r.lat;
     $('al-lng').value = r.lng;
     if(!$('al-editing').value) $('al-cat').value = r.cat;   // don't override an existing stop's category
+    refreshHikeFields();
+    refreshCoordsStatus();
+  }, (status) => {
+    if((status.error || status.count === 0) && !$('al-lat').value.trim()){
+      $('al-coords-wrap').classList.remove('hidden');
+    }
+  });
+  attachAutocomplete($('al-end-search'), (r) => {
+    $('al-end-search').value = r.name;
+    $('al-endlat').value = r.lat;
+    $('al-endlng').value = r.lng;
   });
   attachAutocomplete($('he-name'), (r) => {
     $('he-name').value = r.name;

@@ -10,17 +10,18 @@
    is accepted too for spreadsheet-shaped input.
    ========================================================= */
 
-export const CATEGORIES = ['landmark','museum','church','park','view','food','shop','hotel','travel','boat','other'];
+export const CATEGORIES = ['landmark','museum','church','park','view','food','shop','hike','hotel','flight','travel','boat','other'];
 
 export const DEFAULT_DUR = {
   landmark:45, museum:90, church:30, park:45, view:30, food:60,
-  shop:60, hotel:20, travel:120, boat:30, other:45
+  shop:60, hike:150, hotel:20, flight:90, travel:120, boat:30, other:45
 };
 
 export const THEMES = ['parchment','lagoon','terracotta','midnight','field-notes'];
 
 export function newDay(n){
-  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, order:[] };
+  // bookend: which ends of the day the hotel anchors — 'both' | 'start' | 'end'
+  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', order:[] };
 }
 
 export function blankTrip(){
@@ -51,8 +52,13 @@ function stopLines(s){
     out.push('- lat: ' + s.lat);
     out.push('- lng: ' + s.lng);
   }
+  if(s.endLat != null && s.endLng != null){
+    out.push('- end lat: ' + s.endLat);
+    out.push('- end lng: ' + s.endLng);
+  }
   out.push('- category: ' + (s.cat || 'other'));
   out.push('- duration: ' + (s.dur ?? DEFAULT_DUR[s.cat] ?? 45));
+  if(s.fixedStart) out.push('- fixed start: ' + s.fixedStart);
   if(s.img) out.push('- image: ' + encVal(s.img));
   if(s.desc) out.push('- description: ' + encVal(s.desc));
   if(s.detail) out.push('- detail: ' + encVal(s.detail));
@@ -90,6 +96,7 @@ export function serializeTrip(trip){
     L.push('- start: ' + (d.start || '09:00'));
     const hotel = trip.hotels.find(h => h.id === d.hotelId);
     L.push('- hotel: ' + (hotel ? hotel.name : 'none'));
+    if(hotel && d.bookend && d.bookend !== 'both') L.push('- hotel bookend: ' + d.bookend);
     L.push('');
     d.order.forEach(id => {
       const s = trip.stops[id];
@@ -144,6 +151,10 @@ export function serializeTrip(trip){
 const KEY_ALIASES = {
   lat:'lat', latitude:'lat',
   lng:'lng', lon:'lng', long:'lng', longitude:'lng',
+  'end lat':'endLat', 'end latitude':'endLat', endlat:'endLat',
+  'end lng':'endLng', 'end lon':'endLng', 'end longitude':'endLng', endlng:'endLng',
+  'fixed start':'fixedStart', 'fixed time':'fixedStart', fixed:'fixedStart',
+  'hotel bookend':'bookend', bookend:'bookend',
   category:'cat', cat:'cat', type:'cat',
   duration:'dur', dur:'dur', minutes:'dur', time:'dur',
   image:'img', img:'img', photo:'img', picture:'img',
@@ -191,7 +202,9 @@ function normCat(v){
     viewpoint:'view', lookout:'view', gallery:'museum', shopping:'shop', store:'shop',
     monument:'landmark', sight:'landmark', square:'landmark', plaza:'landmark',
     garden:'park', beach:'park', nature:'park', transit:'travel', train:'travel',
-    ferry:'boat', gondola:'boat', accommodation:'hotel', lodging:'hotel' };
+    ferry:'boat', gondola:'boat', accommodation:'hotel', lodging:'hotel',
+    plane:'flight', airplane:'flight', airport:'flight', fly:'flight',
+    trail:'hike', trek:'hike', trekking:'hike', hiking:'hike', walk:'hike' };
   return map[c] || 'other';
 }
 
@@ -225,6 +238,8 @@ export function parseTrip(text){
       const stop = { id, name:cur.name, cat:cur.cat || 'other',
         dur: cur.dur ?? DEFAULT_DUR[cur.cat || 'other'] ?? 45,
         lat: cur.lat ?? null, lng: cur.lng ?? null,
+        endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
+        fixedStart: cur.fixedStart || null,
         img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
         notes: cur.notes || '', tags: cur.tags || [] };
       trip.stops[id] = stop;
@@ -291,7 +306,8 @@ export function parseTrip(text){
     if(kv){
       const { key, value } = kv;
       if(cur){
-        if(key === 'lat' || key === 'lng'){ const n = parseFloat(value); if(!isNaN(n)) cur[key] = n; }
+        if(key === 'lat' || key === 'lng' || key === 'endLat' || key === 'endLng'){ const n = parseFloat(value); if(!isNaN(n)) cur[key] = n; }
+        else if(key === 'fixedStart'){ if(/^\d{1,2}:\d{2}$/.test(value)) cur.fixedStart = value; }
         else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
         else if(key === 'cat') cur.cat = normCat(value);
         else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
@@ -302,6 +318,7 @@ export function parseTrip(text){
         // day-level metadata
         if(key === 'start' && /^\d{1,2}:\d{2}$/.test(value)) section.start = value;
         else if(key === 'hotel') section.__hotelName = /^(none|no|-|)$/i.test(value) ? null : value;
+        else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.bookend = value.toLowerCase();
       } else if(!section){
         // trip-level metadata
         if(key === 'subtitle') trip.subtitle = decVal(value);

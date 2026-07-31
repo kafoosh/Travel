@@ -20,6 +20,7 @@
   <div class="hero-hotels" id="hero-hotels"></div>
   <div class="toplinks">
     <button id="btn-view-days" class="active">Day by Day</button>
+    <button id="btn-view-all">All Stops</button>
     <button id="btn-view-optional">Optional</button>
     <button id="btn-view-bin">Bin</button>
     <button id="btn-view-info">Trip Info</button>
@@ -36,11 +37,28 @@
     <div class="daypanel" id="daypanel"></div>
   </section>
 
+  <section id="view-all" class="hidden">
+    <div class="daypanel viewpanel">
+      <div class="daypanel-head">
+        <h2>All Stops</h2>
+        <div class="group-controls">
+          <label class="group-label">Split into
+            <input type="number" id="group-days" min="1" max="60" value="3"> days
+          </label>
+          <label class="group-label check"><input type="checkbox" id="group-include-optional"> include Optional ideas</label>
+          <button class="reset-btn" id="group-btn" title="Cluster all stops by proximity into that many days, respecting each day's time budget, then order each day">✨ Group by proximity</button>
+        </div>
+      </div>
+      <div id="all-list" class="bin-list"></div>
+    </div>
+  </section>
+
   <section id="view-optional" class="hidden">
     <div class="daypanel viewpanel">
       <div class="daypanel-head">
         <h2>Optional</h2>
         <span class="head-hint">Ideas not on any day yet — add them where they fit</span>
+        <button class="reset-btn" id="add-optional-btn">+ Add to Optional</button>
       </div>
       <div id="optional-list" class="bin-list"></div>
     </div>
@@ -95,11 +113,23 @@
         <label>Day<select id="al-day"></select></label>
         <label>Category<select id="al-cat"></select></label>
         <label>Duration (minutes)<input type="number" id="al-dur" value="60" min="5" step="5" required></label>
-        <div class="al-coords">
-          <label>Latitude<input type="text" id="al-lat" placeholder="e.g. 41.8986"></label>
-          <label>Longitude<input type="text" id="al-lng" placeholder="e.g. 12.4769"></label>
+        <label>Fixed start time (optional — flight landing, train departure, timed entry)<input type="time" id="al-fixed"></label>
+        <p class="al-coords-status" id="al-coords-status">No coordinates yet — pick a search suggestion above, or <button type="button" class="linklike" id="al-coords-toggle">enter them manually</button>.</p>
+        <div id="al-coords-wrap" class="hidden">
+          <div class="al-coords">
+            <label>Latitude<input type="text" id="al-lat" placeholder="e.g. 41.8986"></label>
+            <label>Longitude<input type="text" id="al-lng" placeholder="e.g. 12.4769"></label>
+          </div>
+          <p class="al-hint">Right-click a spot on any online map and copy the coordinates. Without them the stop still works, but won't appear on the map or in travel times.</p>
         </div>
-        <p class="al-hint">Start typing a name above to search real places — picking a suggestion fills the coordinates and category. Or right-click a spot on any online map and copy the coordinates here. Without them the stop still works, but won't appear on the map or in travel times.</p>
+        <div id="al-end-wrap" class="hidden">
+          <label>Hike ends at (search)<input type="text" id="al-end-search" placeholder="Search the end point…"></label>
+          <div class="al-coords">
+            <label>End latitude<input type="text" id="al-endlat"></label>
+            <label>End longitude<input type="text" id="al-endlng"></label>
+          </div>
+          <p class="al-hint">A hike starts at the main location and ends here — the next stop's travel is measured from the end point, and the hike counts toward the day's walked distance.</p>
+        </div>
         <label>Short description<textarea id="al-desc" rows="2"></textarea></label>
         <label>Longer history/trivia (shown in the popup)<textarea id="al-detail" rows="3"></textarea></label>
         <label>Notes<textarea id="al-notes" rows="2"></textarea></label>
@@ -121,7 +151,14 @@
         <input type="hidden" id="de-index" value="">
         <label>Title<input type="text" id="de-title" required></label>
         <label>Start time<input type="time" id="de-start" required></label>
-        <label>Hotel (start & end of the day)<select id="de-hotel"></select></label>
+        <label>Hotel<select id="de-hotel"></select></label>
+        <label id="de-bookend-label">Hotel anchors…
+          <select id="de-bookend">
+            <option value="both">Start and end of the day</option>
+            <option value="start">Start only (day ends elsewhere)</option>
+            <option value="end">End only (arrive during the day, return here)</option>
+          </select>
+        </label>
         <button type="submit" class="reset-btn">Save day</button>
         <button type="button" class="reset-btn danger" id="de-delete">Delete this day (stops go to the bin)</button>
       </form>

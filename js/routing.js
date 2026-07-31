@@ -56,14 +56,21 @@ export function heuristicLeg(a, b, opts = {}){
   const rawKm = haversineKm(a.lat, a.lng, b.lat, b.lng);
   if(opts.boat){
     // Hotel boat shuttle (e.g. a private-island resort): ~11 km/h door to door.
-    return { minutes: Math.max(10, round5(rawKm / 11 * 60)), mode:'boat', live:false, path:null };
+    return { minutes: Math.max(10, round5(rawKm / 11 * 60)), mode:'boat', live:false, path:null, distKm: rawKm };
   }
   const walkKm = rawKm * circuity(rawKm);
-  if(walkKm <= WALK_MAX_KM){
-    return { minutes: round5(walkKm / WALK_KMH * 60), mode:'walk', live:false, path:null };
+  if(opts.forceWalk || walkKm <= WALK_MAX_KM){
+    return { minutes: round5(walkKm / WALK_KMH * 60), mode:'walk', live:false, path:null, distKm: walkKm };
   }
   // Generic surface transit/taxi guess: ~14 km/h effective + boarding overhead.
-  return { minutes: Math.max(12, round5(rawKm * 1.2 / 14 * 60 + 8)), mode:'transit', live:false, path:null };
+  return { minutes: Math.max(12, round5(rawKm * 1.2 / 14 * 60 + 8)), mode:'transit', live:false, path:null, distKm: rawKm * 1.2 };
+}
+
+export function pathLengthKm(pts){
+  if(!pts || pts.length < 2) return 0;
+  let km = 0;
+  for(let i = 1; i < pts.length; i++) km += haversineKm(pts[i-1][0], pts[i-1][1], pts[i][0], pts[i][1]);
+  return km;
 }
 
 /* ---------- polyline geometry ---------- */
@@ -160,8 +167,9 @@ function legKey(a, b, profile){
   return r4(a.lat) + ',' + r4(a.lng) + '>' + r4(b.lat) + ',' + r4(b.lng) + ':' + profile;
 }
 
-function storeResult(key, minutes, mode, path){
+function storeResult(key, minutes, mode, path, distKm){
   cache[key] = { m: minutes, mode, t: Date.now() };
+  if(typeof distKm === 'number' && distKm > 0) cache[key].d = Math.round(distKm * 100) / 100;
   // Always write a shape entry — p:null is a sentinel meaning "the server
   // answered without geometry", so cache hits know not to refetch forever.
   shapes[key] = { p: (path && path.length > 1) ? roundPath(simplifyPath(path)) : null, t: Date.now() };
@@ -279,7 +287,8 @@ async function fetchValhalla(a, b, costing){
     });
     if(path.length < 2) path = null;
   }
-  return { minutes: Math.max(1, Math.round(sec / 60)), path };
+  const lengthKm = (typeof data.trip.summary.length === 'number') ? data.trip.summary.length : pathLengthKm(path);
+  return { minutes: Math.max(1, Math.round(sec / 60)), path, distKm: lengthKm };
 }
 
 /* ---------- Transitous / MOTIS (public transport) ---------- */
@@ -315,7 +324,10 @@ async function fetchTransitous(a, b, whenIso){
           sec = (new Date(it.endTime) - new Date(it.startTime)) / 1000;
         }
         if(typeof sec === 'number' && sec > 0){
-          return { minutes: Math.max(1, Math.round(sec / 60)), path: transitPath(it, a, b) };
+          const path = transitPath(it, a, b);
+          const legDist = (it.legs || []).reduce((n, l) => n + (typeof l.distance === 'number' ? l.distance : 0), 0);
+          const distKm = legDist > 0 ? legDist / 1000 : pathLengthKm(path);
+          return { minutes: Math.max(1, Math.round(sec / 60)), path, distKm };
         }
       }
       throw new Error('no itinerary');
@@ -348,11 +360,13 @@ function transitPath(it, a, b){
 
 /* ---------- public API ---------- */
 
-/* estimateLeg(a, b, opts) → {minutes, mode, live, path}
-   opts: { boat:bool, dayDate:Date|null, departMinutes:number }
-   path is [[lat,lng],…] when a routed geometry is known, else null. */
+/* estimateLeg(a, b, opts) → {minutes, mode, live, path, distKm}
+   opts: { boat:bool, forceWalk:bool, dayDate:Date|null, departMinutes:number }
+   path is [[lat,lng],…] when a routed geometry is known, else null.
+   forceWalk pins the leg to the pedestrian network regardless of distance
+   (used for hikes, whose whole point is walking a long way). */
 export function estimateLeg(a, b, opts = {}){
-  if(!a || !b || a.lat == null || b.lat == null) return { minutes: 0, mode: null, live: false, path: null };
+  if(!a || !b || a.lat == null || b.lat == null) return { minutes: 0, mode: null, live: false, path: null, distKm: 0 };
 
   const guess = heuristicLeg(a, b, opts);
 
@@ -368,7 +382,9 @@ export function estimateLeg(a, b, opts = {}){
     // was pruned) has no shape entry at all — backfill it with one fetch.
     // p:null means the server already answered without geometry: don't retry.
     if(sh === undefined) queueLegFetch(key, a, b, profile, opts);
-    return { minutes: hit.m, mode: hit.mode, live: true, path: (sh && sh.p) ? sh.p : null };
+    const path = (sh && sh.p) ? sh.p : null;
+    return { minutes: hit.m, mode: hit.mode, live: true, path,
+      distKm: hit.d ?? (path ? pathLengthKm(path) : guess.distKm) };
   }
 
   // Cache miss: return the guess now, fetch the real number in the background.
@@ -380,7 +396,7 @@ function queueLegFetch(key, a, b, profile, opts){
   if(profile === 'walk' && providerOk('valhalla')){
     enqueue(key, async () => {
       const r = await fetchValhalla(a, b, 'pedestrian');
-      storeResult(key, r.minutes, 'walk', r.path);
+      storeResult(key, r.minutes, 'walk', r.path, r.distKm);
     });
   } else if(profile === 'transit'){
     if(!providerOk('transitous') && !providerOk('valhalla')) return;
@@ -388,13 +404,13 @@ function queueLegFetch(key, a, b, profile, opts){
       if(providerOk('transitous')){
         try{
           const r = await fetchTransitous(a, b, transitTime(opts.dayDate, opts.departMinutes ?? 600));
-          storeResult(key, r.minutes, 'transit', r.path);
+          storeResult(key, r.minutes, 'transit', r.path, r.distKm);
           return;
         } catch(e){ /* fall through to a driving estimate */ }
       }
       if(providerOk('valhalla')){
         const r = await fetchValhalla(a, b, 'auto');
-        storeResult(key, r.minutes + 6, 'taxi', r.path);   // hail/park overhead
+        storeResult(key, r.minutes + 6, 'taxi', r.path, r.distKm);   // hail/park overhead
       } else {
         throw new Error('all providers down');
       }

@@ -39,11 +39,24 @@ const colosseum = Object.values(trip.stops).find(s => s.name === 'Colosseum');
 check('Colosseum fields', colosseum && colosseum.dur === 105 && colosseum.cat === 'landmark' && colosseum.tags.length === 1);
 check('trip info sections', ['weather','closures','reservations','events','notes'].every(k => trip.info[k].length > 50));
 
-/* --- 2. notes survive a round-trip --- */
+/* --- 2. notes + new fields survive a round-trip --- */
 colosseum.notes = 'Booked 09:20 entry\nRef ABC-123';
+colosseum.fixedStart = '09:20';
+trip.days[0].hotelId = 'h1';            // arrival day: hotel at the end only
+trip.days[0].bookend = 'end';
+const hikeId = 'u999';
+trip.stops[hikeId] = { id: hikeId, name: 'Sentiero degli Dei', cat: 'hike', dur: 240,
+  lat: 40.6262, lng: 14.5326, endLat: 40.6140, endLng: 14.4780, fixedStart: null,
+  img: '', desc: 'Path of the Gods, Bomerano to Nocelle.', detail: '', notes: '', tags: [] };
+trip.days[0].order.push(hikeId);
 const t2 = parseTrip(serializeTrip(trip)).trip;
 const c2 = Object.values(t2.stops).find(s => s.name === 'Colosseum');
 check('multi-line notes survive', c2.notes === colosseum.notes);
+check('fixed start survives', c2.fixedStart === '09:20');
+check('day bookend survives', t2.days[0].bookend === 'end');
+const h2 = Object.values(t2.stops).find(s => s.name === 'Sentiero degli Dei');
+check('hike end coords survive', h2 && h2.cat === 'hike' && h2.endLat === 40.614 && h2.endLng === 14.478);
+check('extended trip still a fixed point', JSON.stringify(t2) === JSON.stringify(parseTrip(serializeTrip(t2)).trip));
 
 /* --- 3. CSV import --- */
 console.log('csv import:');

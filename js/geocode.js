@@ -68,7 +68,7 @@ async function search(q){
 /* Attach an inline suggestion list under `input`. onPick(result) fires when a
    suggestion is chosen. The list renders as a normal block element (not a
    floating popover) so it never clips inside scrolling modals. */
-export function attachAutocomplete(input, onPick){
+export function attachAutocomplete(input, onPick, onStatus){
   const list = document.createElement('div');
   list.className = 'ac-list hidden';
   input.insertAdjacentElement('afterend', list);
@@ -107,7 +107,12 @@ export function attachAutocomplete(input, onPick){
       results = await search(q);
       activeIdx = -1;
       render();
-    } catch(e){ /* offline / stale / blocked — stay quiet, manual entry still works */ }
+      if(onStatus) onStatus({ count: results.length, error: false });
+    } catch(e){
+      // offline / blocked / stale — manual entry still works; let the caller
+      // know so it can reveal the manual-coordinates fields.
+      if(onStatus && e.message !== 'stale') onStatus({ count: 0, error: true });
+    }
   }, 300);
 
   input.setAttribute('autocomplete', 'off');
