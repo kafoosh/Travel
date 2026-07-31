@@ -102,7 +102,11 @@ Sharing uses Cloud Firestore's free tier. Until configured, the Share button exp
    service cloud.firestore {
      match /databases/{database}/documents {
        match /trips/{code} {
-         allow read, update, create: if request.auth != null
+         // read and write must be separate rules: request.resource only
+         // exists on writes, so referencing it in a read rule denies all reads.
+         allow read: if request.auth != null
+           && code.matches('^[a-z0-9]{12,40}$');
+         allow create, update: if request.auth != null
            && code.matches('^[a-z0-9]{12,40}$')
            && request.resource.data.keys().hasOnly(['trip', 'updatedBy', 'updatedAt']);
          allow delete: if false;
