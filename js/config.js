@@ -1,24 +1,19 @@
 /* =========================================================
    DEPLOYMENT CONFIG
 
-   FIREBASE_CONFIG — paste your Firebase web-app config object
-   here to enable shared trips (the "Create a share link"
-   button). Until then the site runs fully in local-only mode:
-   everything works, saved to this browser.
+   FIREBASE_CONFIG enables shared trips (the "Create a share
+   link" button). These values are public project identifiers,
+   not secrets — what guards the data is the Firestore
+   security rules (see README.md).
 
-   These values are public project identifiers, not secrets —
-   what guards the data is the Firestore security rules
-   (see README.md for the exact rules + setup steps).
-
-   Example:
-   export const FIREBASE_CONFIG = {
-     apiKey: "AIza…",
-     authDomain: "your-project.firebaseapp.com",
-     projectId: "your-project",
-     storageBucket: "your-project.firebasestorage.app",
-     messagingSenderId: "…",
-     appId: "1:…:web:…"
-   };
+   Set to null to run the site fully local-only.
    ========================================================= */
 
-export const FIREBASE_CONFIG = null;
+export const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyARapjDHHXvoV0D9TanYf40sYN6mG7eA6E",
+  authDomain: "travel-54408.firebaseapp.com",
+  projectId: "travel-54408",
+  storageBucket: "travel-54408.firebasestorage.app",
+  messagingSenderId: "857836087284",
+  appId: "1:857836087284:web:968ff05d461c26f20cfba1",
+};
