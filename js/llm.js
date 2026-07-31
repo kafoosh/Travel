@@ -18,6 +18,8 @@ import { serializeTrip } from './format.js';
    this list — adding an option here adds the control. */
 export const PROMPT_PREFS = [
   { key:'destination', type:'text', label:'Destination', placeholder:'e.g. Lisbon, or Kyoto & Osaka' },
+  { key:'days', type:'number', label:'Number of days', min:1, max:60,
+    placeholderFn: t => 'trip has ' + t.days.length },
   { key:'travellers', type:'text', label:'Who’s going', placeholder:'e.g. 2 adults + a 7-year-old' },
   { key:'pace', type:'choice', label:'Pace', options:['Relaxed','Balanced','Packed'], def:'Balanced' },
   { key:'budget', type:'choice', label:'Budget', options:['Shoestring','Mid-range','Comfortable','Luxury'], def:'Mid-range' },
@@ -30,13 +32,18 @@ export const PROMPT_PREFS = [
   { key:'extras', type:'text', label:'Anything else', placeholder:'e.g. must see the Benfica match on the 12th' },
 ];
 
-/* Turn collected preference values into prompt lines. */
-function prefLines(prefs){
+/* Turn collected preference values into prompt lines. `days` is handled
+   separately: in a new plan it drives the "Number of days" line, so it would
+   be redundant here; in an edit it IS the change being asked for. */
+function prefLines(prefs, trip, mode){
   if(!prefs) return '';
   const L = [];
   const val = k => prefs[k];
   const add = (label, v) => { if(v && String(v).trim()) L.push('- ' + label + ': ' + String(v).trim()); };
   add('Destination', val('destination'));
+  if(mode === 'edit' && val('days') && Number(val('days')) !== trip.days.length){
+    add('Trip length', val('days') + ' days — reshape the plan to this many days (currently ' + trip.days.length + ')');
+  }
   add('Travellers', val('travellers'));
   if(val('pace')) add('Pace', val('pace') + (val('pace') === 'Relaxed' ? ' — fewer stops, more time at each' : val('pace') === 'Packed' ? ' — fit in as much as reasonably possible' : ''));
   add('Budget', val('budget'));
@@ -62,7 +69,7 @@ export function buildPrompt(trip, mode = 'new', prefs = null){
 function buildEditPrompt(trip, prefs){
   return `You are a travel-planning assistant. I have an existing trip in a structured markdown format — the complete current plan is at the bottom of this message. I want you to EDIT it.
 
-First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.${prefLines(prefs)}
+First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.${prefLines(prefs, trip, 'edit')}
 
 RULES
 =====
@@ -81,7 +88,8 @@ ${serializeTrip(trip)}`;
 }
 
 function buildNewPrompt(trip, prefs){
-  const dayCount = trip.days.length;
+  const wanted = prefs && Number(prefs.days);
+  const dayCount = (wanted && wanted > 0) ? wanted : trip.days.length;
   const hasName = trip.name && trip.name !== 'Untitled Trip';
   const asks = [];
   if(!hasName) asks.push('where I am going');
@@ -95,7 +103,7 @@ Put the ENTIRE document inside a single fenced code block (start a line with thr
 ${hasName ? `Destination / trip: ${trip.name}` : 'First ask me where I am going, for how many days, and roughly when.'}
 Number of days: ${dayCount}${trip.startDate ? `\nTrip start date: ${trip.startDate} (use real weekdays for closures and events)` : ''}
 
-Before writing the plan, ask me any questions you still need answered, and suggest 2–3 hotels if I haven't named one.${prefLines(prefs)}
+Before writing the plan, ask me any questions you still need answered, and suggest 2–3 hotels if I haven't named one.${prefLines(prefs, trip, 'new')}
 
 FORMAT SPECIFICATION
 ====================

@@ -1094,6 +1094,7 @@ h1.title:hover{color:var(--accent-dark);}
   background:var(--card);
   color:var(--ink);
 }
+.pref-text.pref-num{width:110px;}
 .chip-row{display:flex; gap:5px; flex-wrap:wrap;}
 .pref-chip{
   font-family:'IBM Plex Mono', monospace;

@@ -1746,13 +1746,19 @@ function renderPromptPrefs(onChange){
     lab.textContent = p.label;
     wrap.appendChild(lab);
 
-    if(p.type === 'text'){
+    if(p.type === 'text' || p.type === 'number'){
       const inp = document.createElement('input');
-      inp.type = 'text';
-      inp.className = 'pref-text';
-      inp.placeholder = p.placeholder || '';
-      inp.value = promptPrefs[p.key] || '';
-      inp.addEventListener('input', () => { promptPrefs[p.key] = inp.value; updatePrefCount(); bump(); });
+      inp.type = p.type;
+      inp.className = 'pref-text' + (p.type === 'number' ? ' pref-num' : '');
+      if(p.min != null) inp.min = p.min;
+      if(p.max != null) inp.max = p.max;
+      inp.placeholder = p.placeholderFn ? p.placeholderFn(trip()) : (p.placeholder || '');
+      inp.value = promptPrefs[p.key] ?? '';
+      inp.addEventListener('input', () => {
+        promptPrefs[p.key] = inp.value === '' ? '' : inp.value;
+        updatePrefCount();
+        bump();
+      });
       wrap.appendChild(inp);
     } else {
       const row = document.createElement('div');
