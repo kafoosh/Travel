@@ -7,13 +7,14 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 ## Features
 
 - **Start from nothing** — name the trip, pick the number of days (optionally a start date, which gives every day a real weekday), add hotels and locations. Everything is editable.
-- **Import / export** — the whole trip (locations, coordinates, images, descriptions, notes, hotels, trip info) round-trips through one markdown file. A CSV of locations works too.
-- **Plan with an AI** — Trip Info has a copyable, editable prompt in two modes: *plan a new trip* (embeds the format spec) or *edit this trip* (embeds the full current plan so the AI knows exactly what exists and returns the complete updated trip to import back — user notes are explicitly protected). A **Tailor the plan** panel adds destination, travellers, pace, budget, transport preference, morning start, interests, food/dietary needs, accessibility, and things to avoid, all folded into the prompt. Example files in `.md`, `.txt`, and `.csv` ship in `demo/`.
+- **Import / export** — the whole trip (locations, coordinates, images, descriptions, notes, hotels, trip info) round-trips through one markdown file. A CSV of locations works too. Both live on the **AI Plan** tab, alongside the assistant prompt they feed.
+- **Plan with an AI** — the AI Plan tab has a copyable, editable prompt in two modes: *plan a new trip* (embeds the format spec) or *edit this trip* (embeds the full current plan so the AI knows exactly what exists and returns the complete updated trip to import back — user notes are explicitly protected). A **Tailor the plan** panel adds destination, travellers, pace, budget, transport preference, morning start, interests, food/dietary needs, accessibility, and things to avoid, all folded into the prompt. Example files in `.md`, `.txt`, and `.csv` ship in `demo/`.
 - **Import survives real-world LLM output** — the prompt asks for a fenced code block (so `#`/`-` markers survive copy-paste), and the parser unwraps fences and *reconstructs* stripped markers when a chat UI rendered the markdown before you copied it.
 - **Per-leg transport** — click any travel connector to pin that leg to walk / cycle / transit / taxi / boat; the leg re-routes against the matching profile and the schedule recalculates. Routed transit legs report the real vehicle (bus, metro, tram, ferry).
 - **External maps** — per-day "Open in Google Maps" directions links, and a whole-trip KML export for [Google My Maps](https://mymaps.google.com) (one toggleable layer per day, with pins and routes).
 - **Real travel times** — walking and driving legs are routed by the [FOSSGIS Valhalla server](https://valhalla.openstreetmap.de), public transport (including ferries like Venice's vaporetti) by [Transitous](https://transitous.org). Both are free, keyless, community-run, OSM-based. Distance-based estimates render instantly (marked "est") and upgrade in place when routed answers land; results are cached in the browser, so a settled trip makes no further requests.
 - **Route optimisation** — per-day (nearest-neighbour + 2-opt over best-known travel minutes) and whole-trip **Auto-plan**: cheapest-insertion assignment with hard per-day time budgets (visit durations + travel + hotel legs), load-adaptive seeding so dense areas get more days, hotel-region coherence (a day sleeping in Rome never becomes a Venice day), and balance sweeps. Auto-plan shows a per-day preview — mini-map, schedule, distance, and runs-late warnings — to accept or reject before anything changes. Optimisation is a suggestion — drag-and-drop is always the escape hatch, and everything is one Undo away.
+- **Reorderable days** — drag a day tab along the strip to move that day in the trip (or focus a tab and press Shift + ← / →; the day editor has Move earlier / Move later for touch). Days renumber themselves, dates follow the new order, and untouched "Day N" titles keep up.
 - **Unassigned stops** — stops with no day yet live in their own tab *and* in a collapsible tray on every day panel and on All Stops (always present, so it is also where you add a stop without a day). Drag a chip onto the schedule to place it at an exact position, or click it to drop it straight into that day (in All Stops, clicking offers a day picker, so it works on touch too).
 - **Notes everywhere** — every location has a free-text notes field (booking refs, must-try dishes…), included in export/import and sync.
 - **Share on demand — and sharing is saving** — an unshared trip lives only in its browser tab (a reload keeps it; a fresh tab at the bare URL always opens a new blank trip). Click "Create a share link" and the trip moves to Cloud Firestore at a stable URL: everyone holding the link edits the same plan, live, and that link is how you come back to it. Requires the one-time Firebase setup below; without it the site still works as a tab-local planner with export/import.
@@ -35,7 +36,7 @@ Opening `index.html` via `file://` mostly works, but browsers block `fetch` on t
 
 ## Import format
 
-One markdown file. The full spec is embedded in the AI prompt (Trip Info → "Plan with an AI assistant"); the short version:
+One markdown file. The full spec is embedded in the AI prompt (AI Plan → "Plan with an AI assistant"); the short version:
 
 ```markdown
 # Trip: Rome & Venice
@@ -161,7 +162,7 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | `js/llm.js` | The AI-assistant prompt builder |
 | `js/config.js` | **Deployment config — paste your Firebase config here** |
 | `vendor/leaflet/` | Leaflet 1.9.4, vendored (no CDN dependency) |
-| `demo/rome-venice-trip.md` | Example trip, loadable from Trip Info |
+| `demo/rome-venice-trip.md` | Example trip, loadable from the AI Plan tab |
 
 ## Development notes
 

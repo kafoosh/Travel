@@ -237,6 +237,14 @@ h1.title:hover{color:var(--accent-dark);}
 .daytab.active{background:var(--accent);color:#fff;border-color:var(--accent-dark);}
 .daytab.active .d-num{color:#fff;}
 .daytab:not(.active):hover{background:var(--paper);}
+.daytab:focus-visible{outline:2px solid var(--gold); outline-offset:2px;}
+/* the label spans must not take drag events of their own: crossing into a
+   child fires dragleave on the tab and would flicker the drop marker off */
+.daytab > span{pointer-events:none;}
+.daytab.dragging{opacity:.35;}
+/* the tab strip runs horizontally, so the drop marker sits on a side edge */
+.daytab.drop-before{box-shadow: inset 3px 0 0 var(--gold);}
+.daytab.drop-after{box-shadow: inset -3px 0 0 var(--gold);}
 
 /* ---------- Day panel ---------- */
 .daypanel{

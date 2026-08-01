@@ -24,6 +24,7 @@
     <button id="btn-view-optional">Unassigned</button>
     <button id="btn-view-bin">Bin</button>
     <button id="btn-view-info">Trip Info</button>
+    <button id="btn-view-ai">AI Plan</button>
     <button id="btn-search" title="Search the itinerary (press /)">🔍 Search</button>
     <button id="btn-settings" title="Trip settings">⚙ Settings</button>
     <button id="undo-btn" title="Undo last change" disabled>↺ Undo</button>
@@ -78,6 +79,16 @@
     <div class="daypanel viewpanel">
       <div class="daypanel-head"><h2>Trip Info</h2></div>
       <div class="infogrid" id="infogrid"></div>
+    </div>
+  </section>
+
+  <section id="view-ai" class="hidden">
+    <div class="daypanel viewpanel">
+      <div class="daypanel-head">
+        <h2>AI Plan</h2>
+        <span class="head-hint">Have an AI write or rework the trip, then import it — and export what you have</span>
+      </div>
+      <div class="infogrid" id="aigrid"></div>
     </div>
   </section>
 
@@ -163,6 +174,12 @@
             <option value="end">End only (arrive during the day, return here)</option>
           </select>
         </label>
+        <label>Position in the trip</label>
+        <div class="cloud-btn-row">
+          <button type="button" class="reset-btn" id="de-earlier">← Move earlier</button>
+          <button type="button" class="reset-btn" id="de-later">Move later →</button>
+        </div>
+        <p class="al-hint">Days can also be dragged straight into place on the Day by Day tab strip.</p>
         <button type="submit" class="reset-btn">Save day</button>
         <button type="button" class="reset-btn danger" id="de-delete">Delete this day (stops go to the bin)</button>
       </form>

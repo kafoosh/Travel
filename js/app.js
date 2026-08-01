@@ -4,7 +4,14 @@
 
 import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook } from './state.js';
 import { initCloud, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
-import { renderAll, renderInfo, renderCloudUI, wireStaticHandlers, applyTheme, setView } from './ui.js';
+import { renderAll, renderInfo, renderAiPlan, renderCloudUI, wireStaticHandlers, applyTheme, setView } from './ui.js';
+
+/* The tabs that render lazily: renderAll() covers the itinerary views, these
+   two rebuild only when they're the one on screen. */
+function renderOpenTab(){
+  if(state.currentView === 'info') renderInfo();
+  if(state.currentView === 'ai') renderAiPlan();
+}
 
 loadState();
 applyTheme();
@@ -14,7 +21,7 @@ wireStaticHandlers();
 setCloudPushHook(scheduleCloudPush);
 
 renderAll();
-if(state.currentView === 'info') renderInfo();
+renderOpenTab();
 
 // Opened via a share link: reflect that immediately rather than flashing
 // "saved in this browser only" while Firestore loads.
@@ -26,7 +33,7 @@ initCloud({
     persistLocal();     // not saveState() — that would echo the change back up
     applyTheme();
     renderAll();
-    if(state.currentView === 'info') renderInfo();
+    renderOpenTab();
   },
 });
 renderCloudUI();

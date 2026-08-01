@@ -26,7 +26,7 @@ function currentRoomCode(){
 export const state = {
   trip: blankTrip(),
   currentDayIndex: 0,
-  currentView: 'days',    // 'days' | 'all' | 'bin' | 'optional' | 'info'
+  currentView: 'days',    // 'days' | 'all' | 'bin' | 'optional' | 'info' | 'ai'
   mobilePane: 'list',
   undoStack: [],
 };

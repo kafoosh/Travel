@@ -53,6 +53,7 @@ let modalStopId = null;
 let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
 let promptMode = null;    // sticky mode radio choice
 let promptPrefs = {};     // tailoring controls (destination, pace, interests…)
+let importNote = '';      // last import's error/warning line, shown on the AI Plan tab
 let pendingFlash = null;   // {id, until} — highlight survives async re-renders
 
 function applyPendingFlash(){
@@ -97,16 +98,60 @@ function renderHero(){
 /* =========================================================
    DAY TABS
    ========================================================= */
+/* Day drags carry their own MIME type so a stop dragged across the tab strip
+   can't be mistaken for one (and vice versa). */
+const DAY_DND = 'application/x-travel-day';
+const isDayDrag = (e) => Array.from(e.dataTransfer.types || []).includes(DAY_DND);
+const clearTabMarks = () => document.querySelectorAll('.daytab').forEach(t => t.classList.remove('drop-before','drop-after'));
+
 function renderTabs(){
   const el = $('daytabs');
   el.innerHTML = '';
   trip().days.forEach((d, i) => {
     const btn = document.createElement('div');
     btn.className = 'daytab' + (i === state.currentDayIndex ? ' active' : '');
+    btn.draggable = true;
+    btn.tabIndex = 0;
+    btn.title = 'Drag to reorder the trip (or focus and press Shift + ← / →)';
     const date = dayDate(trip().startDate, i);
     btn.innerHTML = '<span class="d-num">D' + d.id + '</span> · ' + esc(d.title) +
       (date ? ' <span style="opacity:.75">· ' + formatDayDate(date) + '</span>' : '');
     btn.addEventListener('click', () => { state.currentDayIndex = i; renderAll(); });
+
+    btn.addEventListener('dragstart', e => {
+      btn.classList.add('dragging');
+      e.dataTransfer.setData(DAY_DND, String(i));
+      e.dataTransfer.setData('text/plain', 'day:' + i);   // Safari wants a text flavour
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    btn.addEventListener('dragend', () => { btn.classList.remove('dragging'); clearTabMarks(); });
+    btn.addEventListener('dragover', e => {
+      if(!isDayDrag(e)) return;
+      e.preventDefault();
+      const rect = btn.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      btn.classList.toggle('drop-before', before);
+      btn.classList.toggle('drop-after', !before);
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drop-before','drop-after'));
+    btn.addEventListener('drop', e => {
+      if(!isDayDrag(e)) return;
+      e.preventDefault();
+      const rect = btn.getBoundingClientRect();
+      const before = (e.clientX - rect.left) < rect.width / 2;
+      clearTabMarks();
+      moveDay(parseInt(e.dataTransfer.getData(DAY_DND), 10), before ? i : i + 1);
+    });
+
+    btn.addEventListener('keydown', e => {
+      if(!e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const landed = moveDay(i, e.key === 'ArrowLeft' ? i - 1 : i + 2);
+      const tab = landed == null ? null : $('daytabs').children[landed];
+      if(tab) tab.focus();
+    });
+
     el.appendChild(btn);
   });
   const add = document.createElement('div');
@@ -120,7 +165,50 @@ function renderTabs(){
     saveState();
     renderAll();
   });
+  // dropping past the last day tab sends the day to the end
+  add.addEventListener('dragover', e => {
+    if(!isDayDrag(e)) return;
+    e.preventDefault();
+    add.classList.add('drop-before');
+  });
+  add.addEventListener('dragleave', () => add.classList.remove('drop-before'));
+  add.addEventListener('drop', e => {
+    if(!isDayDrag(e)) return;
+    e.preventDefault();
+    clearTabMarks();
+    moveDay(parseInt(e.dataTransfer.getData(DAY_DND), 10), trip().days.length);
+  });
   el.appendChild(add);
+}
+
+/* Move the day at `from` so it lands at index `to` of the *current* list
+   (i.e. `to` is counted before the day is lifted out).
+
+   Day ids are positional — D1, D2, … — so the run is renumbered afterwards.
+   Two things ride on those numbers and are carried across: a title still
+   holding its auto-generated "Day N" follows the new position, and the
+   "suggested day" on unassigned stops is remapped through the permutation
+   so it keeps pointing at the day the suggestion meant. */
+function moveDay(from, to){
+  const days = trip().days;
+  if(!(from >= 0 && from < days.length)) return;
+  const target = Math.max(0, Math.min(days.length - 1, to > from ? to - 1 : to));
+  if(target === from) return;
+  pushUndo();
+  const viewed = days[state.currentDayIndex];    // stay on the day being looked at
+  const autoTitled = new Set(days.filter(d => d.title === 'Day ' + d.id).map(d => d.id));
+  const [moved] = days.splice(from, 1);
+  days.splice(target, 0, moved);
+  const remap = new Map(days.map((d, i) => [d.id, i + 1]));
+  days.forEach((d, i) => {
+    if(autoTitled.has(d.id)) d.title = 'Day ' + (i + 1);
+    d.id = i + 1;
+  });
+  trip().optional.forEach(o => { if(o.day && remap.has(o.day)) o.day = remap.get(o.day); });
+  state.currentDayIndex = Math.max(0, days.indexOf(viewed));
+  saveState();
+  renderAll();
+  return target;
 }
 
 /* =========================================================
@@ -1004,8 +1092,23 @@ function openDayEdit(dayIndex){
   const syncBookendVisibility = () => $('de-bookend-label').classList.toggle('hidden', !sel.value);
   sel.onchange = syncBookendVisibility;
   syncBookendVisibility();
+  syncDayMoveButtons(dayIndex);
   $('day-edit-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+}
+
+/* Reordering for touch, where dragging a tab isn't available. The modal
+   stays open on the day it was opened for, which has just changed index. */
+function syncDayMoveButtons(idx){
+  $('de-earlier').disabled = idx <= 0;
+  $('de-later').disabled = idx >= trip().days.length - 1;
+}
+function moveDayFromModal(dir){
+  const idx = parseInt($('de-index').value, 10);
+  const landed = moveDay(idx, dir < 0 ? idx - 1 : idx + 2);
+  if(landed == null) return;
+  $('de-index').value = String(landed);
+  syncDayMoveButtons(landed);
 }
 function closeDayEdit(){
   $('day-edit-overlay').classList.remove('open');
@@ -1583,6 +1686,77 @@ export function renderInfo(){
         <textarea class="info-edit" data-info="${key}" placeholder="${esc(ph)}">${esc(t.info[key] || '')}</textarea>
       </div>`).join('')}
     <div class="infocard" style="grid-column:1/-1;">
+      <h3>Share &amp; sync across devices</h3>
+      <p>Create a share link and this trip moves to the cloud. Open the link on your phone, or send it to whoever you're travelling with — everyone sees the same plan, and edits show up on the other devices within a second or two. No accounts: the link <i>is</i> the key.</p>
+      <p><b>Sharing is also how a trip is saved.</b> An unshared trip lives only in this browser tab — nothing is uploaded, and closing the tab lets it go, so the bare site URL always opens a fresh blank trip. Share (or Export) anything you want to keep.</p>
+      <p id="cloud-state" class="cloud-state"></p>
+      <div id="cloud-link-row" class="cloud-link-row hidden">
+        <input type="text" id="cloud-link" readonly aria-label="Share link" />
+        <button class="reset-btn" id="cloud-copy">Copy link</button>
+      </div>
+      <div class="cloud-btn-row">
+        <button class="reset-btn" id="cloud-create">Create a share link</button>
+        <button class="reset-btn hidden" id="cloud-duplicate" title="Copy this trip to a second room with its own link — the current link keeps the trip as it is now">Duplicate to a new room</button>
+        <button class="reset-btn hidden" id="cloud-leave">Stop syncing</button>
+      </div>
+      <div class="cloud-btn-row" id="cloud-danger-row">
+        <button class="reset-btn danger" id="cloud-empty" title="Wipe the itinerary but keep this room and its link">Empty this room</button>
+        <button class="reset-btn danger" id="cloud-delete" title="Delete the shared copy so the link stops working">Delete this room</button>
+      </div>
+      <p class="cloud-warn"><b>Worth knowing:</b> anyone holding the link can edit the trip, and a link that gets out can't be revoked — duplicate to a new room (and delete the old one) to cut it off. Simultaneous edits resolve last-change-wins. "Stop syncing" only detaches this browser and leaves the shared copy alone; "Empty this room" clears the itinerary for everyone on the link but keeps the link working; "Delete this room" removes the shared copy for good.</p>
+    </div>
+  `;
+
+  // hotels list
+  const list = $('hotel-mini-list');
+  if(!t.hotels.length){
+    list.innerHTML = '<p>No hotels yet. Adding one lets each day start and end there, with the travel time shown.</p>';
+  } else {
+    list.innerHTML = '';
+    t.hotels.forEach(h => {
+      const row = document.createElement('div');
+      row.className = 'hotel-mini-row';
+      row.innerHTML = `
+        <span class="h-name">${esc(h.name)}${h.mode === 'boat' ? ' · 🚤 boat shuttle' : ''}</span>
+        <button data-act="edit">Edit</button>
+        <button data-act="del">Remove</button>`;
+      row.querySelector('[data-act="edit"]').addEventListener('click', () => openHotelEdit(h.id));
+      row.querySelector('[data-act="del"]').addEventListener('click', () => deleteHotel(h.id));
+      list.appendChild(row);
+    });
+  }
+  $('add-hotel-btn').addEventListener('click', () => openHotelEdit(null));
+
+  // editable info fields
+  el.querySelectorAll('.info-edit').forEach(ta => {
+    autoGrow(ta);
+    ta.addEventListener('input', debounce(() => {
+      trip().info[ta.dataset.info] = ta.value;
+      saveState();
+    }, 600));
+  });
+
+  // cloud
+  $('cloud-create').addEventListener('click', createRoom);
+  $('cloud-duplicate').addEventListener('click', duplicateCurrentRoom);
+  $('cloud-empty').addEventListener('click', emptyCurrentRoom);
+  $('cloud-delete').addEventListener('click', deleteCurrentRoom);
+  $('cloud-leave').addEventListener('click', () => {
+    if(confirm('Stop syncing this browser with the shared trip? The shared copy stays available at the link.')) leaveRoom();
+  });
+  $('cloud-copy').addEventListener('click', () => copyText($('cloud-link').value, $('cloud-copy'), 'Copy link'));
+  renderCloudUI();
+}
+
+/* =========================================================
+   AI PLAN TAB — the assistant prompt, and import / export
+   ========================================================= */
+export function renderAiPlan(){
+  const el = $('aigrid');
+  const t = trip();
+
+  el.innerHTML = `
+    <div class="infocard" style="grid-column:1/-1;">
       <h3>Plan with an AI assistant</h3>
       <p>Copy this prompt into any AI assistant (Claude, ChatGPT…). It asks the right questions, then produces a trip in exactly the format this site imports — locations with coordinates, descriptions, restaurant picks, closures, reservations.</p>
       <div class="prompt-mode" id="prompt-mode">
@@ -1623,60 +1797,7 @@ export function renderInfo(){
         <a href="demo/rome-venice-trip.txt" download>.txt</a> ·
         <a href="demo/rome-venice-trip.csv" download>.csv (locations only)</a></p>
     </div>
-    <div class="infocard" style="grid-column:1/-1;">
-      <h3>Share &amp; sync across devices</h3>
-      <p>Create a share link and this trip moves to the cloud. Open the link on your phone, or send it to whoever you're travelling with — everyone sees the same plan, and edits show up on the other devices within a second or two. No accounts: the link <i>is</i> the key.</p>
-      <p><b>Sharing is also how a trip is saved.</b> An unshared trip lives only in this browser tab — nothing is uploaded, and closing the tab lets it go, so the bare site URL always opens a fresh blank trip. Share (or Export) anything you want to keep.</p>
-      <p id="cloud-state" class="cloud-state"></p>
-      <div id="cloud-link-row" class="cloud-link-row hidden">
-        <input type="text" id="cloud-link" readonly aria-label="Share link" />
-        <button class="reset-btn" id="cloud-copy">Copy link</button>
-      </div>
-      <div class="cloud-btn-row">
-        <button class="reset-btn" id="cloud-create">Create a share link</button>
-        <button class="reset-btn hidden" id="cloud-duplicate" title="Copy this trip to a second room with its own link — the current link keeps the trip as it is now">Duplicate to a new room</button>
-        <button class="reset-btn hidden" id="cloud-leave">Stop syncing</button>
-      </div>
-      <div class="cloud-btn-row" id="cloud-danger-row">
-        <button class="reset-btn danger" id="cloud-empty" title="Wipe the itinerary but keep this room and its link">Empty this room</button>
-        <button class="reset-btn danger" id="cloud-delete" title="Delete the shared copy so the link stops working">Delete this room</button>
-      </div>
-      <p class="cloud-warn"><b>Worth knowing:</b> anyone holding the link can edit the trip, and a link that gets out can't be revoked — duplicate to a new room (and delete the old one) to cut it off. Simultaneous edits resolve last-change-wins. "Stop syncing" only detaches this browser and leaves the shared copy alone; "Empty this room" clears the itinerary for everyone on the link but keeps the link working; "Delete this room" removes the shared copy for good.</p>
-    </div>
-    <div class="infocard">
-      <h3>How to use this site</h3>
-      <p>Unassigned stops (no day yet) sit in their own tab and in the "Unassigned" tray on each day — drag one onto the schedule to place it, or click it to add it to that day. Reorder a day by dragging a stop card with its ⠿ handle — dragging anywhere else selects text. Keyboard: focus the handle and press ↑/↓. Click a card for details and notes; 🔍 (or /) searches everything. "Move to…" reassigns a stop; 🗑 sends it to the Bin. "✨ Optimize route" reorders one day; "✨ Auto-plan" (All Stops tab) regroups the whole trip by proximity and daily feasibility, with a preview to accept or reject. Travel times marked "est" are distance-based guesses that upgrade automatically to real routed times.</p>
-    </div>
   `;
-
-  // hotels list
-  const list = $('hotel-mini-list');
-  if(!t.hotels.length){
-    list.innerHTML = '<p>No hotels yet. Adding one lets each day start and end there, with the travel time shown.</p>';
-  } else {
-    list.innerHTML = '';
-    t.hotels.forEach(h => {
-      const row = document.createElement('div');
-      row.className = 'hotel-mini-row';
-      row.innerHTML = `
-        <span class="h-name">${esc(h.name)}${h.mode === 'boat' ? ' · 🚤 boat shuttle' : ''}</span>
-        <button data-act="edit">Edit</button>
-        <button data-act="del">Remove</button>`;
-      row.querySelector('[data-act="edit"]').addEventListener('click', () => openHotelEdit(h.id));
-      row.querySelector('[data-act="del"]').addEventListener('click', () => deleteHotel(h.id));
-      list.appendChild(row);
-    });
-  }
-  $('add-hotel-btn').addEventListener('click', () => openHotelEdit(null));
-
-  // editable info fields
-  el.querySelectorAll('.info-edit').forEach(ta => {
-    autoGrow(ta);
-    ta.addEventListener('input', debounce(() => {
-      trip().info[ta.dataset.info] = ta.value;
-      saveState();
-    }, 600));
-  });
 
   // LLM prompt — default to 'edit' once the trip actually has content.
   // The textarea is editable; user edits stick (per session) until the mode
@@ -1717,17 +1838,7 @@ export function renderInfo(){
   });
   $('import-paste-btn').addEventListener('click', () => doImport($('import-paste').value));
   $('demo-btn').addEventListener('click', loadDemo);
-
-  // cloud
-  $('cloud-create').addEventListener('click', createRoom);
-  $('cloud-duplicate').addEventListener('click', duplicateCurrentRoom);
-  $('cloud-empty').addEventListener('click', emptyCurrentRoom);
-  $('cloud-delete').addEventListener('click', deleteCurrentRoom);
-  $('cloud-leave').addEventListener('click', () => {
-    if(confirm('Stop syncing this browser with the shared trip? The shared copy stays available at the link.')) leaveRoom();
-  });
-  $('cloud-copy').addEventListener('click', () => copyText($('cloud-link').value, $('cloud-copy'), 'Copy link'));
-  renderCloudUI();
+  $('import-warnings').textContent = importNote;
 }
 
 /* Build the "Tailor the plan" controls from PROMPT_PREFS; every change
@@ -1829,14 +1940,22 @@ function exportTrip(){
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
+/* Held in a variable, not just in the DOM: a successful import switches to
+   Day by Day, so the note has to still be there when the AI Plan tab is
+   rebuilt on the way back. */
+function setImportNote(text){
+  importNote = text;
+  const el = $('import-warnings');
+  if(el) el.textContent = text;
+}
+
 function doImport(text){
-  const warnEl = $('import-warnings');
-  warnEl.textContent = '';
+  setImportNote('');
   let result;
   try{
     result = importText(text);
   } catch(e){
-    warnEl.textContent = '✕ ' + e.message;
+    setImportNote('✕ ' + e.message);
     return;
   }
   const n = Object.keys(result.trip.stops).length;
@@ -1847,9 +1966,9 @@ function doImport(text){
   renderAll();
   renderInfo();
   setView('days');
-  if(result.warnings.length){
-    warnEl.textContent = '⚠ ' + result.warnings.slice(0, 6).join(' ') + (result.warnings.length > 6 ? ' (+' + (result.warnings.length - 6) + ' more)' : '');
-  }
+  setImportNote(result.warnings.length
+    ? '⚠ ' + result.warnings.slice(0, 6).join(' ') + (result.warnings.length > 6 ? ' (+' + (result.warnings.length - 6) + ' more)' : '')
+    : '');
 }
 
 async function loadDemo(){
@@ -1858,7 +1977,7 @@ async function loadDemo(){
     if(!res.ok) throw new Error('HTTP ' + res.status);
     doImport(await res.text());
   } catch(e){
-    $('import-warnings').textContent = '✕ Could not load the example trip (' + e.message + ').';
+    setImportNote('✕ Could not load the example trip (' + e.message + ').');
   }
 }
 
@@ -2041,7 +2160,7 @@ function clearTrip(){
    ========================================================= */
 export function setView(view){
   state.currentView = view;
-  ['days','all','bin','optional','info'].forEach(v => {
+  ['days','all','bin','optional','info','ai'].forEach(v => {
     $('btn-view-' + v).classList.toggle('active', view === v);
     $('view-' + v).classList.toggle('hidden', view !== v);
   });
@@ -2054,6 +2173,7 @@ export function setView(view){
   if(view === 'bin') renderBin();
   if(view === 'optional') renderOptional();
   if(view === 'info') renderInfo();
+  if(view === 'ai') renderAiPlan();
 }
 
 function renderFooter(){
@@ -2103,6 +2223,7 @@ export function wireStaticHandlers(){
   on('btn-view-bin', 'click', () => setView('bin'));
   on('btn-view-optional', 'click', () => setView('optional'));
   on('btn-view-info', 'click', () => setView('info'));
+  on('btn-view-ai', 'click', () => setView('ai'));
   on('group-btn', 'click', autoPlanPreview);
   on('auto-plan-close', 'click', closeAutoPlan);
   on('ap-cancel', 'click', closeAutoPlan);
@@ -2176,6 +2297,8 @@ export function wireStaticHandlers(){
   on('day-edit-close', 'click', closeDayEdit);
   on('day-edit-overlay', 'click', (e) => { if(e.target.id === 'day-edit-overlay') closeDayEdit(); });
   on('day-edit-form', 'submit', submitDayEdit);
+  on('de-earlier', 'click', () => moveDayFromModal(-1));
+  on('de-later', 'click', () => moveDayFromModal(1));
   on('de-delete', 'click', deleteDay);
 
   // hotel edit
