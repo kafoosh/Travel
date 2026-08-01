@@ -61,6 +61,48 @@ function prefLines(prefs, trip, mode){
   return '\n\nWHAT I WANT\n===========\n' + L.join('\n');
 }
 
+/* The five "### " subsections of "## Trip Info", in document order, with the
+   brief each one answers. Single source of truth: both prompts render their
+   Trip Info spec from here, and the titles are exactly the ones INFO_KEYS in
+   format.js recognises — any other heading gets folded into Notes on import. */
+const INFO_SECTIONS = [
+  ['weather', 'Weather',
+   'expected weather for the dates (or the season, if no start date is set), and what to pack'],
+  ['closures', 'Closures',
+   'bulleted list: every attraction in the plan with a weekly closing day, e.g. "- Musée d’Orsay — closed Mondays". If the start date is known, flag any stop that lands on its closed day.'],
+  ['reservations', 'Reservations',
+   'bulleted list, grouped by urgency: which stops/restaurants need booking and how far ahead'],
+  ['events', 'Events',
+   'festivals, exhibitions, or public holidays overlapping the trip dates'],
+  ['notes', 'Notes',
+   'anything else important: local transport tips, scams to avoid, dress codes, day-trip logistics'],
+];
+
+/* The spec block itself — kept free of commentary so it can be copied
+   verbatim; anything trailing a "### " heading would be filed under Notes. */
+function infoSpec(){
+  return INFO_SECTIONS
+    .map(([, title, brief]) => '### ' + title + '\n<' + brief + '>')
+    .join('\n\n');
+}
+
+/* Which sections this trip already has, and which are absent. serializeTrip
+   omits empty ones entirely, so for a trip whose Trip Info tab is blank the
+   embedded document shows no trace that the section exists — say so in words
+   rather than annotating the spec. */
+function infoStatus(info){
+  const has = t => String((info || {})[t] || '').trim();
+  const filled = INFO_SECTIONS.filter(([k]) => has(k)).map(([, t]) => t);
+  const empty = INFO_SECTIONS.filter(([k]) => !has(k)).map(([, t]) => t);
+  const L = [];
+  if(empty.length) L.push('Not in the document at all yet: ' + empty.join(', ') + '. Research these for this destination and these dates and write them — that is information I want the plan to carry.');
+  if(filled.length){
+    const it = filled.length > 1 ? 'them' : 'it';
+    L.push('Already written: ' + filled.join(', ') + '. Keep ' + it + ', and extend ' + it + ' so closures, reservations and events cover every stop you add or move.');
+  }
+  return L.join('\n');
+}
+
 export function buildPrompt(trip, mode = 'new', prefs = null){
   if(mode === 'edit') return buildEditPrompt(trip, prefs);
   return buildNewPrompt(trip, prefs);
@@ -78,9 +120,20 @@ RULES
 - Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line.
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
-- Keep "## Unassigned" and "## Trip Info" sections present and updated to stay consistent with the changes (closures, reservations, and events should cover any newly added stops).
+- Keep "## Unassigned" present and updated.
+- End the document with the "## Trip Info" section described below — all five subsections, filled in.
 - Travel between stops is computed automatically — durations are visit time only.
 - If asked for further revisions, output the complete document again in full.
+
+TRIP INFO SECTION
+=================
+The document ends with "## Trip Info", built from exactly these five "###" subsections, in this order. Use these headings verbatim, with nothing after them on the line — any other heading is filed under Notes on import.
+
+## Trip Info
+
+${infoSpec()}
+
+${infoStatus(trip.info)}
 
 CURRENT TRIP DOCUMENT
 =====================
@@ -159,20 +212,9 @@ Arrival/departure days: model the flight or train as its own stop — category "
 
 ## Trip Info
 
-### Weather
-<expected weather for the season, and what to pack>
+(All five subsections, with these exact headings, in this order — any other heading is filed under Notes on import.)
 
-### Closures
-<bulleted list: every attraction in the plan with a weekly closing day, e.g. "- Musée d'Orsay — closed Mondays". If the start date is known, flag any stop that lands on its closed day.>
-
-### Reservations
-<bulleted list, grouped by urgency: which stops/restaurants need booking and how far ahead>
-
-### Events
-<festivals, exhibitions, or public holidays overlapping the trip dates>
-
-### Notes
-<anything else important: local transport tips, scams to avoid, dress codes, day-trip logistics>
+${infoSpec()}
 
 RULES
 =====
@@ -181,5 +223,6 @@ RULES
 - Durations are visit time only; travel between stops is computed automatically.
 - Keep each "- key: value" on a single line (no line breaks inside a value).
 - Cluster each day geographically; put lunch/dinner stops where the day actually is at that time.
+- Fill in all five "## Trip Info" subsections — they are part of the plan, not optional extras.
 - If asked for revisions, output the complete document again in full.`;
 }
