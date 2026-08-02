@@ -114,9 +114,16 @@ function renderTabs(){
     btn.draggable = true;
     btn.tabIndex = 0;
     btn.title = 'Drag to reorder the trip (or focus and press Shift + ← / →)';
+    /* Two lines: the day number and date on top, the title beneath. A long
+       title then ellipsizes inside a width-capped tab instead of stretching
+       it off the edge of the strip. */
     const date = dayDate(trip().startDate, i);
-    btn.innerHTML = '<span class="d-num">D' + d.id + '</span> · ' + esc(d.title) +
-      (date ? ' <span style="opacity:.75">· ' + formatDayDate(date) + '</span>' : '');
+    btn.innerHTML =
+      '<span class="d-top"><span class="d-num">D' + d.id + '</span>' +
+      (date ? '<span class="d-date">' + formatDayDate(date) + '</span>' : '') + '</span>' +
+      '<span class="d-title">' + esc(d.title) + '</span>';
+    btn.title = d.title + (date ? ' · ' + formatDayDate(date) : '') +
+      ' — drag to reorder the trip (or focus and press Shift + ← / →)';
     btn.addEventListener('click', () => { state.currentDayIndex = i; renderAll(); });
 
     btn.addEventListener('dragstart', e => {

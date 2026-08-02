@@ -295,12 +295,22 @@ h1.title:hover{color:var(--accent-dark);}
   padding:22px 4px 8px;
   scrollbar-width:thin;
 }
+/* Two lines — "D5 · Tue Sep 30" over the title — and a hard width cap. A day
+   called "Travel & Arrival" used to stretch its tab past the edge of the
+   screen; now the title ellipsizes and every tab stays a similar size. */
 .daytab{
   flex:none;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:flex-start;
+  gap:2px;
+  min-width:0;
+  max-width:210px;
   font-family:'IBM Plex Mono', monospace;
   font-size:12.5px;
   cursor:pointer;
-  padding:9px 14px 11px;
+  padding:7px 14px 9px;
   border-radius:10px 10px 0 0;
   border:1px solid var(--line);
   border-bottom:none;
@@ -309,21 +319,37 @@ h1.title:hover{color:var(--accent-dark);}
   position:relative;
   white-space:nowrap;
 }
+.daytab .d-top{
+  display:flex;
+  align-items:baseline;
+  gap:6px;
+  font-size:10.5px;
+  letter-spacing:0.05em;
+}
 .daytab .d-num{font-weight:600;color:var(--ink);}
+.daytab .d-date{color:var(--ink-soft); opacity:.85;}
+.daytab .d-title{
+  max-width:100%;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  font-size:12.5px;
+}
 .daytab.active{background:var(--accent);color:#fff;border-color:var(--accent-dark);}
-.daytab.active .d-num{color:#fff;}
+.daytab.active .d-num, .daytab.active .d-date{color:#fff;}
+.daytab.active .d-date{opacity:.8;}
 .daytab:not(.active):hover{background:var(--paper);}
 .daytab:focus-visible{outline:2px solid var(--gold); outline-offset:2px;}
 /* the label spans must not take drag events of their own: crossing into a
    child fires dragleave on the tab and would flicker the drop marker off */
-.daytab > span{pointer-events:none;}
+.daytab span{pointer-events:none;}
 .daytab.dragging{opacity:.35;}
 /* the tab strip runs horizontally, so the drop marker sits on a side edge */
 .daytab.drop-before{box-shadow: inset 3px 0 0 var(--gold);}
 .daytab.drop-after{box-shadow: inset -3px 0 0 var(--gold);}
 /* A coloured day wears its band on the tab even when inactive; the active
    fill follows automatically via the --accent override. */
-.daytab[data-day-color]{border-top:3px solid var(--accent); padding-top:7px;}
+.daytab[data-day-color]{border-top:3px solid var(--accent); padding-top:4px;}   /* 4 + 3px border = the 7px base */
 .daytab[data-day-color].drop-before{box-shadow: inset 3px 0 0 var(--gold);}
 .daytab[data-day-color].drop-after{box-shadow: inset -3px 0 0 var(--gold);}
 
@@ -1004,12 +1030,15 @@ h1.title:hover{color:var(--accent-dark);}
     padding:6px 14px 0;
     gap:5px;
   }
+  /* Narrower cap than desktop so two or three days are always in view —
+     align-items stays flex-start for the two-line stack. */
   .daytab{
     scroll-snap-align:start;
-    min-height:44px;
-    display:flex; align-items:center;
-    padding:8px 13px;
+    min-height:46px;
+    max-width:158px;
+    padding:6px 12px 8px;
   }
+  .daytab[data-day-color]{ padding-top:3px; }   /* 3 + 3px border = the 6px base */
 
   .daypanel{ border-radius:12px; }
   .daypanel-head{ padding:16px 16px 12px; gap:8px; }
