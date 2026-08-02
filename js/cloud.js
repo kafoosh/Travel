@@ -7,6 +7,14 @@
    the link edits the same trip. If FIREBASE_CONFIG is null
    (see config.js) this module reports 'unconfigured' and the
    site runs local-only.
+
+   Write safety: a device may only write to a room it just
+   created, or one whose contents it has already received
+   (`hydrated`). Firestore reports "document doesn't exist"
+   from its local cache while the backend is unreachable —
+   trusting that, or pushing edits made before the first sync
+   arrived, is how a blank or stale device once wiped a
+   populated room.
    ========================================================= */
 
 import { FIREBASE_CONFIG } from './config.js';
@@ -18,6 +26,9 @@ const CLIENT_ID = Math.random().toString(36).slice(2, 10);
 let api = null;              // firestore adapter once loaded
 let unsub = null;
 let pushTimer = null;
+/* Write-safety latch: set once this client created the current room, or has
+   applied its contents from a snapshot. Every cloud write is gated on it. */
+let hydrated = false;
 let onRemoteTrip = null;     // callback(trip)
 let onStatus = null;         // callback() — read cloud.* for details
 let getTrip = null;          // () => current trip object
@@ -42,6 +53,15 @@ function errorMessage(e, what){
   if(code === 'unavailable' || code === 'auth/network-request-failed')
     return 'Can’t reach Firestore. Changes are saved on this device and will go up when the connection returns.';
   return (e && e.message) || String(e);
+}
+
+/* Shown when the server confirms the room's doc doesn't exist and this
+   client didn't just create it: the room was deleted, or the link is bad. */
+function missingRoomMessage(){
+  const t = getTrip && getTrip();
+  const hasContent = !!(t && (Object.keys(t.stops || {}).length || (t.hotels || []).length));
+  return 'This room no longer exists on the server — it may have been deleted, or the link may be incomplete. Nothing was written to it from this device.'
+    + (hasContent ? ' The trip shown here is this device’s own copy — “Duplicate to a new room” shares it at a fresh link.' : '');
 }
 
 export function newRoomCode(){
@@ -76,6 +96,7 @@ async function loadFirebase(){
       fsMod.onSnapshot(fsMod.doc(db, 'trips', code), snap => onData({
         exists: snap.exists(),
         pending: snap.metadata.hasPendingWrites,
+        fromCache: snap.metadata.fromCache,
         data: snap.data(),
       }), onError),
   };
@@ -96,24 +117,32 @@ export function initCloud(handlers){
   if(code) joinRoom(code);
 }
 
-export async function joinRoom(code){
+export async function joinRoom(code, opts = {}){
+  const expectNew = !!opts.expectNew;   // true only for a room this client just created
+  detach();
   cloud.room = code;
+  hydrated = expectNew;
   setStatus('connecting');
   try{
     await loadFirebase();
     await api.signIn();
-    if(unsub){ unsub(); unsub = null; }
-    let seeded = false;
+    let seeded = false;        // room seen with contents, or seeded by us
     let firstSnapshot = true;
     unsub = api.subscribe(code, snap => {
       if(snap.pending) return;
       if(!snap.exists){
-        if(!seeded){ seeded = true; pushNow(); }   // adopt a never-written room
+        /* A cache-served miss only means the backend is unreachable and the
+           doc isn't in the SDK's local cache — it proves nothing about the
+           room, so it must never trigger a write. */
+        if(snap.fromCache) return;
+        if(expectNew && !seeded){ seeded = true; pushNow(); }   // first write of a just-created room
+        else { hydrated = false; setStatus('error', missingRoomMessage()); }  // deleted or bad link — stop writing
         return;
       }
       seeded = true;
-      if(snap.data && snap.data.updatedBy === CLIENT_ID){ setStatus('synced'); return; }
+      if(snap.data && snap.data.updatedBy === CLIENT_ID){ hydrated = true; setStatus('synced'); return; }
       if(snap.data && isValidTrip(snap.data.trip)){
+        hydrated = true;       // the room's real contents are in — writing is safe now
         onRemoteTrip(snap.data.trip);
         if(!firstSnapshot){
           cloud.note = 'Just updated from another device';
@@ -124,7 +153,9 @@ export async function joinRoom(code){
       firstSnapshot = false;
       setStatus('synced');
     }, e => setStatus('error', errorMessage(e)));
-    setStatus('synced');
+    /* Status stays 'connecting' until the first snapshot arrives — claiming
+       'synced' here used to put a reassuring label over a trip that hadn't
+       loaded yet. */
   } catch(e){
     setStatus('error', errorMessage(e));
   }
@@ -135,6 +166,7 @@ export async function joinRoom(code){
 function detach(){
   if(unsub){ unsub(); unsub = null; }
   clearTimeout(pushTimer);
+  hydrated = false;          // detached ⇒ not writable
 }
 
 function notConfigured(){
@@ -145,7 +177,7 @@ function notConfigured(){
 async function openNewRoom(){
   const code = newRoomCode();
   history.replaceState(null, '', shareUrl(code));
-  await joinRoom(code);
+  await joinRoom(code, { expectNew: true });
   await pushNow();
   return cloud.status !== 'error';
 }
@@ -193,13 +225,13 @@ export function leaveRoom(){
 }
 
 export function scheduleCloudPush(){
-  if(!cloud.room || !api) return;
+  if(!cloud.room || !api || !hydrated) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(pushNow, 800);
 }
 
 async function pushNow(){
-  if(!cloud.room || !api) return;
+  if(!cloud.room || !api || !hydrated) return;
   try{
     await api.write(cloud.room, {
       trip: getTrip(),

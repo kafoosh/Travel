@@ -131,6 +131,10 @@ Sharing uses Cloud Firestore's free tier. Until configured, the Share button exp
 
 The config values are public identifiers, not secrets — the rules above are what guard the data. Room codes are 16 random characters in the URL fragment; anyone with a link can edit that trip, and links can't be revoked — to cut off a link that got out, duplicate the trip to a new room and delete the old one.
 
+### Why a device that opens a link can't wipe the room
+
+A browser that merely follows a share link never writes to the room until the room's current contents have arrived from the server. That matters because Firestore answers "no such document" *from its local cache* while the backend is unreachable — on a flaky network a fresh (or long-stale) device could take that as "empty room" and push its blank or outdated copy over everyone's trip. Edits made before the first sync lands are held back for the same reason. Only the device that just created a room writes it into existence; opening a link to a room that no longer exists shows an error (with "Duplicate to a new room" as the way to re-share a copy this device still holds) instead of quietly re-creating it. As a last-ditch safety net, when an incoming sync would replace a populated local copy with an empty one, the populated copy is kept in `localStorage` under `travelPlanner_room_<code>_backup` for manual recovery.
+
 ## Routing services & being a good guest
 
 The site uses two public, fair-use servers with no signup:
