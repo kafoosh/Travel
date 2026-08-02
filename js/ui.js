@@ -8,7 +8,7 @@
 
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
 import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, newDay, serializeTrip, importText, blankTrip } from './format.js';
-import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, forgetRoomCache, rememberPane } from './state.js';
+import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
 import { computeSchedule, getHotel } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
@@ -1314,11 +1314,18 @@ function renderOptional(){
 function renderBin(){
   const el = $('bin-list');
   if(!el) return;
-  if(state.trip.bin.length === 0){
-    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing in the bin. Remove a stop from any day (the 🗑 button) and it'll show up here to restore later.</p>`;
+  const doneItems = trip().checklist.filter(c => c.done);
+  if(state.trip.bin.length === 0 && !doneItems.length){
+    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing in the bin. Remove a stop from any day (the 🗑 button), or tick a checklist item off in Trip Info, and it'll show up here to bring back later.</p>`;
     return;
   }
   el.innerHTML = '';
+  if(state.trip.bin.length){
+    const head = document.createElement('div');
+    head.className = 'bin-head';
+    head.textContent = 'Removed locations (' + state.trip.bin.length + ')';
+    el.appendChild(head);
+  }
   trip().bin.forEach(id => {
     const s = trip().stops[id];
     if(!s) return;
@@ -1352,6 +1359,42 @@ function renderBin(){
     });
     el.appendChild(row);
   });
+
+  // Completed checklist items park here — ticked, not lost.
+  if(doneItems.length){
+    const head = document.createElement('div');
+    head.className = 'bin-head';
+    head.textContent = 'Completed checklist (' + doneItems.length + ')';
+    el.appendChild(head);
+    doneItems.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'bin-row check-bin-row';
+      row.innerHTML = `
+        <div class="stop-illustration">✅</div>
+        <div class="stop-main"><p class="stop-name done">${esc(item.text)}</p></div>
+        <div class="manage-row">
+          <button class="restore-btn">Return</button>
+          <button class="bin-btn" title="Delete forever">✕</button>
+        </div>`;
+      row.querySelector('.restore-btn').addEventListener('click', () => {
+        pushUndo();
+        item.done = false;
+        saveState();
+        renderBin();
+        if(state.currentView === 'info') renderInfo();
+        updateUndoButton();
+      });
+      row.querySelector('.bin-btn').addEventListener('click', () => {
+        if(!confirm('Delete "' + item.text + '" permanently?')) return;
+        pushUndo();
+        trip().checklist = trip().checklist.filter(c => c.id !== item.id);
+        saveState();
+        renderBin();
+        updateUndoButton();
+      });
+      el.appendChild(row);
+    });
+  }
 }
 
 /* =========================================================
@@ -1762,28 +1805,126 @@ function renderDayMapsOverlay(plan, opts){
    TRIP INFO TAB
    ========================================================= */
 const INFO_CARDS = [
-  ['weather', 'Weather', 'Expected weather for your dates, what to pack…'],
-  ['closures', 'Location closures', 'Which attractions close on which weekdays — e.g. "Musée d’Orsay — closed Mondays"'],
-  ['reservations', 'Reservation musts', 'What needs booking, and how far ahead…'],
-  ['events', 'Overlapping events', 'Festivals, exhibitions, holidays during the trip…'],
-  ['notes', 'General notes', 'Anything else — transport tips, etiquette, scams to avoid…'],
+  ['weather', '🌦', 'Weather', 'Expected weather for your dates, what to pack…'],
+  ['closures', '🚪', 'Location closures', 'Which attractions close on which weekdays — e.g. "Musée d’Orsay — closed Mondays"'],
+  ['reservations', '🎟', 'Reservation musts', 'What needs booking, and how far ahead…'],
+  ['events', '🎉', 'Overlapping events', 'Festivals, exhibitions, holidays during the trip…'],
+  ['notes', '📝', 'General notes', 'Anything else — transport tips, etiquette, scams to avoid…'],
 ];
+
+/* The open half of the checklist. Ticking an item doesn't delete it — it
+   moves to the Bin's completed section, where it can be brought back. */
+function renderChecklist(){
+  const el = $('check-list');
+  if(!el) return;
+  const open = trip().checklist.filter(c => !c.done);
+  if(!open.length){
+    el.innerHTML = '<p class="check-empty">Nothing to do yet — add bookings, packing, anything you need to remember.</p>';
+    return;
+  }
+  el.innerHTML = '';
+  open.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'check-row';
+    row.innerHTML = `
+      <label class="check-box">
+        <input type="checkbox" aria-label="Mark done: ${esc(item.text)}">
+        <span class="check-text">${esc(item.text)}</span>
+      </label>
+      <button type="button" class="check-del" title="Delete this item">✕</button>`;
+    row.querySelector('input').addEventListener('change', () => {
+      pushUndo();
+      item.done = true;
+      saveState();
+      renderInfo();
+      updateUndoButton();
+    });
+    row.querySelector('.check-del').addEventListener('click', () => {
+      pushUndo();
+      trip().checklist = trip().checklist.filter(c => c.id !== item.id);
+      saveState();
+      renderInfo();
+      updateUndoButton();
+    });
+    el.appendChild(row);
+  });
+}
+
+/* Trip Info holds real prose — paragraphs, "- " lists and "**bold**" lead-ins
+   (that's what the AI plans produce). Reading it raw inside a textarea is the
+   hard part, so the card shows formatted text and only becomes an editor when
+   you click it. Input is escaped before any markup is added. */
+function infoHtml(text){
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const out = [];
+  let list = null, para = [];
+  const flushPara = () => {
+    if(para.length) out.push('<p>' + para.join('<br>') + '</p>');
+    para = [];
+  };
+  const flushList = () => {
+    if(list) out.push('<ul>' + list.join('') + '</ul>');
+    list = null;
+  };
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+  lines.forEach(raw => {
+    const line = raw.trim();
+    if(!line){ flushPara(); flushList(); return; }
+    const bullet = /^[-*•]\s+(.*)$/.exec(line);
+    if(bullet){
+      flushPara();
+      (list = list || []).push('<li>' + inline(bullet[1]) + '</li>');
+      return;
+    }
+    flushList();
+    // A line that is entirely bold reads as a heading for what follows.
+    const lead = /^\*\*(.+)\*\*$/.exec(line);
+    if(lead){ flushPara(); out.push('<p class="info-lead">' + esc(lead[1]) + '</p>'); return; }
+    para.push(inline(line));
+  });
+  flushPara(); flushList();
+  return out.join('');
+}
 
 export function renderInfo(){
   const el = $('infogrid');
   const t = trip();
 
+  const open = t.checklist.filter(c => !c.done);
+  const doneCount = t.checklist.length - open.length;
+
   el.innerHTML = `
-    <div class="infocard" style="grid-column:1/-1;">
-      <h3>Hotels</h3>
+    <div class="infocard span-all">
+      <h3><span class="ic-icon" aria-hidden="true">✅</span> Checklist
+        ${open.length ? `<span class="ic-count">${open.length} open</span>` : ''}</h3>
+      <form class="check-add" id="check-add-form">
+        <input type="text" id="check-add-input" placeholder="Add a to-do — book tickets, renew passport…" autocomplete="off">
+        <button type="submit" class="reset-btn">+ Add</button>
+      </form>
+      <div class="check-list" id="check-list"></div>
+      ${doneCount ? `<p class="check-done-note">${doneCount} completed item${doneCount === 1 ? '' : 's'} — in the <button type="button" class="linklike" id="check-to-bin">Bin</button>, where they can be brought back.</p>` : ''}
+    </div>
+    <div class="infocard span-all">
+      <h3><span class="ic-icon" aria-hidden="true">🛏️</span> Hotels</h3>
       <div id="hotel-mini-list"></div>
       <button class="reset-btn" id="add-hotel-btn" style="margin-top:10px;">+ Add hotel</button>
     </div>
-    ${INFO_CARDS.map(([key, title, ph]) => `
-      <div class="infocard">
-        <h3>${title}</h3>
-        <textarea class="info-edit" data-info="${key}" placeholder="${esc(ph)}">${esc(t.info[key] || '')}</textarea>
-      </div>`).join('')}
+    <div class="info-notes">
+    ${INFO_CARDS.map(([key, icon, title, ph]) => {
+      const val = t.info[key] || '';
+      return `
+      <div class="infocard info-note" data-key="${key}">
+        <h3><span class="ic-icon" aria-hidden="true">${icon}</span> ${title}
+          <button type="button" class="ic-edit" data-edit="${key}" title="Edit ${title}">✎ Edit</button>
+        </h3>
+        <div class="info-read" data-read="${key}" tabindex="0" role="button" title="Click to edit">${
+          val.trim() ? infoHtml(val) : `<p class="info-empty">${esc(ph)}</p>`
+        }</div>
+        <textarea class="info-edit hidden" data-info="${key}" placeholder="${esc(ph)}">${esc(val)}</textarea>
+      </div>`;
+    }).join('')}
+    </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Share &amp; sync across devices</h3>
       <p>Create a share link and this trip moves to the cloud. Open the link on your phone, or send it to whoever you're travelling with — everyone sees the same plan, and edits show up on the other devices within a second or two. No accounts: the link <i>is</i> the key.</p>
@@ -1826,11 +1967,56 @@ export function renderInfo(){
   }
   $('add-hotel-btn').addEventListener('click', () => openHotelEdit(null));
 
-  // editable info fields
-  el.querySelectorAll('.info-edit').forEach(ta => {
-    autoGrow(ta);
+  // checklist
+  renderChecklist();
+  $('check-add-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = $('check-add-input');
+    const text = input.value.trim();
+    if(!text) return;
+    pushUndo();
+    trip().checklist.push({ id: nextChecklistId(), text, done: false });
+    input.value = '';
+    saveState();
+    renderInfo();
+    updateUndoButton();
+    const again = $('check-add-input');
+    if(again) again.focus();     // keep adding without re-clicking
+  });
+  const toBin = $('check-to-bin');
+  if(toBin) toBin.addEventListener('click', () => setView('bin'));
+
+  /* Info notes: read view until clicked, textarea while editing. Saving on
+     blur (not per keystroke) is what lets the read view rebuild once. */
+  el.querySelectorAll('.info-note').forEach(card => {
+    const key = card.dataset.key;
+    const read = card.querySelector('.info-read');
+    const ta = card.querySelector('.info-edit');
+    const editBtn = card.querySelector('.ic-edit');
+    const startEdit = () => {
+      read.classList.add('hidden');
+      ta.classList.remove('hidden');
+      autoGrow(ta);
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    };
+    const stopEdit = () => {
+      const val = ta.value;
+      trip().info[key] = val;
+      saveState();
+      read.innerHTML = val.trim() ? infoHtml(val) : '<p class="info-empty">' + esc(ta.placeholder) + '</p>';
+      ta.classList.add('hidden');
+      read.classList.remove('hidden');
+    };
+    read.addEventListener('click', startEdit);
+    read.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); startEdit(); }
+    });
+    editBtn.addEventListener('click', () => (ta.classList.contains('hidden') ? startEdit() : stopEdit()));
+    ta.addEventListener('blur', stopEdit);
+    // Belt and braces: a tab switch or reload mid-edit still keeps the text.
     ta.addEventListener('input', debounce(() => {
-      trip().info[ta.dataset.info] = ta.value;
+      trip().info[key] = ta.value;
       saveState();
     }, 600));
   });

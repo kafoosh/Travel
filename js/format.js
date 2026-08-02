@@ -56,6 +56,9 @@ export function blankTrip(){
     // already carry it.
     optional:[],             // {id, day, note}
     bin:[],                  // [stopId]
+    // Trip to-dos — book this, pack that. Ticked items stay in the list with
+    // done:true; the UI parks them in the Bin so they can be brought back.
+    checklist:[],            // {id, text, done}
     info:{ weather:'', closures:'', reservations:'', events:'', notes:'' },
     counter:0                // id counter for stops added in the UI
   };
@@ -155,6 +158,12 @@ export function serializeTrip(trip){
     });
   }
 
+  if((trip.checklist || []).length){
+    L.push('## Checklist', '');
+    trip.checklist.forEach(c => L.push('- [' + (c.done ? 'x' : ' ') + '] ' + encVal(c.text)));
+    L.push('');
+  }
+
   const info = trip.info || {};
   const infoSections = [
     ['Weather', info.weather], ['Closures', info.closures],
@@ -244,7 +253,7 @@ function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
   const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
-  const TOP = /^(hotels?|optional|unassigned|bin|trip\s*info)\s*$/i;
+  const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
   let started = false, inInfo = false;
@@ -339,8 +348,20 @@ export function parseTrip(text){
       } else if(/^hotels?$/i.test(title)) section = 'hotels';
       else if(/^(optional|unassigned)/i.test(title)) section = 'optional';   // "Optional" kept as an alias for older files
       else if(/^bin$/i.test(title)) section = 'bin';
+      else if(/^(checklist|to-?dos?|to do)$/i.test(title)) section = 'checklist';
       else if(/^trip\s*info/i.test(title) || /^info$/i.test(title)) section = 'info';
       else { warnings.push('Unrecognised section "' + title + '" — skipped.'); section = 'skip'; }
+      continue;
+    }
+
+    /* Checklist items are plain lines, not headings or key:values — handled
+       before everything else so a "###"-looking or colon-bearing item can't be
+       mistaken for a stop or a field. "[x]" marks done; a bare line (markers
+       stripped by a chat UI) still counts as an open item. */
+    if(section === 'checklist'){
+      const m = /^[-*]?\s*\[([ xX])\]\s*(.*)$/.exec(line);
+      const text = m ? m[2].trim() : line.replace(/^[-*]\s*/, '').trim();
+      if(text) trip.checklist.push({ id: 'k' + (trip.checklist.length + 1), text: decVal(text), done: !!(m && m[1].toLowerCase() === 'x') });
       continue;
     }
 

@@ -70,6 +70,16 @@ export function normalizeTrip(t){
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
   trip.optional = (t.optional || []).filter(o => o && t.stops && t.stops[o.id]);
   trip.bin = (t.bin || []).filter(id => t.stops && t.stops[id]);
+  // Checklist: drop empties, keep ids unique (they key DOM rows and undo).
+  const seenIds = new Set();
+  trip.checklist = (t.checklist || [])
+    .filter(c => c && typeof c.text === 'string' && c.text.trim())
+    .map((c, i) => {
+      let id = typeof c.id === 'string' && c.id ? c.id : 'k' + (i + 1);
+      while(seenIds.has(id)) id = 'k' + (i + 1) + '-' + seenIds.size;
+      seenIds.add(id);
+      return { id, text: c.text.trim(), done: !!c.done };
+    });
   trip.stops = t.stops || {};
   Object.values(trip.stops).forEach(s => {
     if(!Array.isArray(s.tags)) s.tags = [];
@@ -153,4 +163,10 @@ export function nextHotelId(){
   let n = 1;
   while(state.trip.hotels.some(h => h.id === 'h' + n)) n++;
   return 'h' + n;
+}
+
+export function nextChecklistId(){
+  let n = 1;
+  while(state.trip.checklist.some(c => c.id === 'k' + n)) n++;
+  return 'k' + n;
 }

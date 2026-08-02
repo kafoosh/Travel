@@ -56,6 +56,20 @@ check('multi-line notes survive', c2.notes === colosseum.notes);
 check('fixed start survives', c2.fixedStart === '09:20');
 check('day bookend survives', t2.days[0].bookend === 'end');
 check('day colour survives', t2.days[0].color === 'teal');
+check('checklist survives with done state', (() => {
+  trip.checklist = [
+    { id:'k1', text:'Book Borghese: timed entry', done:false },
+    { id:'k2', text:'Renew passport', done:true },
+  ];
+  const t = parseTrip(serializeTrip(trip)).trip;
+  return t.checklist.length === 2
+    && t.checklist[0].text === 'Book Borghese: timed entry' && t.checklist[0].done === false
+    && t.checklist[1].text === 'Renew passport' && t.checklist[1].done === true;
+})());
+check('checklist trip is still a fixed point', (() => {
+  const t = parseTrip(serializeTrip(trip)).trip;
+  return JSON.stringify(t) === JSON.stringify(parseTrip(serializeTrip(t)).trip);
+})());
 check('unknown day colour is dropped', (() => {
   const bad = parseTrip(serializeTrip(trip).replace('- color: teal', '- color: neon')).trip;
   return bad.days[0].color === null;

@@ -122,6 +122,7 @@ RULES
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
 - Keep "## Unassigned" present and updated.
+- Keep the "## Checklist" section and every one of its "- [ ] " / "- [x] " lines exactly as they are unless I ask to change them (the "[x]" ones are already done).
 - End the document with the "## Trip Info" section described below — all five subsections, filled in.
 - Travel between stops is computed automatically — durations are visit time only.
 - If asked for further revisions, output the complete document again in full.
@@ -211,6 +212,12 @@ Arrival/departure days: model the flight or train as its own stop — category "
 - suggestion note: <one sentence on why/when to add it>
 
 (3–8 interesting niche spots that didn't make the main plan — worth seeing, but not slotted into a day.)
+
+## Checklist
+
+- [ ] <something to do before or during the trip>
+
+(Optional. Bookings to make, documents to sort, things to pack — one "- [ ] " line each. "- [x] " marks an item already done.)
 
 ## Trip Info
 
