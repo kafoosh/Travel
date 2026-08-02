@@ -183,9 +183,11 @@ function renderTabs(){
 
   // Keep the active tab in view when the strip scrolls (mobile). Horizontal
   // scroll on the strip only — scrollIntoView could also scroll the page.
+  // Both offsetLefts are body-relative (nothing between tab and body is a
+  // positioned ancestor), so subtract the strip's own offset.
   const active = el.querySelector('.daytab.active');
   if(active && el.scrollWidth > el.clientWidth){
-    const target = active.offsetLeft - (el.clientWidth - active.offsetWidth) / 2;
+    const target = active.offsetLeft - el.offsetLeft - (el.clientWidth - active.offsetWidth) / 2;
     el.scrollLeft = Math.max(0, Math.min(target, el.scrollWidth - el.clientWidth));
   }
 }
@@ -235,13 +237,24 @@ function renderDayPanel(){
 
   let hotelBarHtml = '';
   if(trip().hotels.length){
+    // On mobile the bar rests as a one-line summary (the chips take real
+    // space); tapping it unfolds the choices. Desktop shows chips directly —
+    // the summary button is display:none there.
+    const current = trip().hotels.find(h => h.id === day.hotelId);
     hotelBarHtml = `
-    <div class="hotel-toggle">
-      <span class="hotel-toggle-label">Staying at:</span>
-      <button class="hotel-opt ${!day.hotelId ? 'active' : ''}" data-hotel="">No hotel</button>
-      ${trip().hotels.map(h =>
-        `<button class="hotel-opt ${day.hotelId === h.id ? 'active' : ''}" data-hotel="${esc(h.id)}">${esc(h.name)}</button>`
-      ).join('')}
+    <div class="hotel-toggle" id="hotel-toggle">
+      <button type="button" class="hotel-summary" id="hotel-summary" aria-expanded="false">
+        <span class="hotel-toggle-label">Staying at:</span>
+        <span class="hs-name">${current ? esc(current.name) : 'No hotel'}</span>
+        <span class="hs-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="hotel-opts">
+        <span class="hotel-toggle-label">Staying at:</span>
+        <button class="hotel-opt ${!day.hotelId ? 'active' : ''}" data-hotel="">No hotel</button>
+        ${trip().hotels.map(h =>
+          `<button class="hotel-opt ${day.hotelId === h.id ? 'active' : ''}" data-hotel="${esc(h.id)}">${esc(h.name)}</button>`
+        ).join('')}
+      </div>
     </div>`;
   }
 
@@ -314,6 +327,11 @@ function renderDayPanel(){
   btnMap.addEventListener('click', () => applyPaneMode('map'));
   applyPaneMode(state.mobilePane || 'list');
 
+  const hotelSummary = $('hotel-summary');
+  if(hotelSummary) hotelSummary.addEventListener('click', () => {
+    const open = $('hotel-toggle').classList.toggle('open');
+    hotelSummary.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
   panel.querySelectorAll('.hotel-opt').forEach(btn => {
     btn.addEventListener('click', () => {
       pushUndo();
@@ -1640,6 +1658,9 @@ function autoPlanPreview(){
   plan.days.forEach((d, i) => { d.id = i + 1; });
   const { orders } = autoPlanOrders(plan);
   plan.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
+  // Colours label areas, and auto-plan just re-clustered the stops — a day's
+  // old colour would now tag the wrong place, so the proposal starts clean.
+  plan.days.forEach(d => { d.color = null; });
   pendingPlan = plan;
   renderDayMapsOverlay(plan, {
     title: 'Auto-plan preview',
@@ -2317,13 +2338,19 @@ export function wireStaticHandlers(){
     moreSheet.hidden = !open;
     const btn = $('btn-more');
     if(btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // Keyboard users: land in the sheet on open, back on the trigger on close.
+    if(open){ const first = moreSheet.querySelector('.sheet-panel button'); if(first) first.focus(); }
+    else if(btn && moreSheet.contains(document.activeElement)) btn.focus();
   };
   on('btn-more', 'click', () => setMore(moreSheet && moreSheet.hidden));
   on('more-backdrop', 'click', () => setMore(false));
   [['mnav-optional','optional'], ['mnav-bin','bin'], ['mnav-ai','ai']].forEach(([id, view]) =>
     on(id, 'click', () => { setMore(false); setView(view); }));
   document.addEventListener('keydown', (e) => {
-    if(e.key === 'Escape' && moreSheet && !moreSheet.hidden) setMore(false);
+    if(e.key !== 'Escape' || !moreSheet || moreSheet.hidden) return;
+    // An overlay stacked above the sheet owns this Escape — close layers one at a time.
+    if(document.querySelector('.modal-overlay.open')) return;
+    setMore(false);
   });
   document.documentElement.dataset.view = state.currentView;
   on('group-btn', 'click', autoPlanPreview);

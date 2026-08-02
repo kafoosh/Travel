@@ -98,8 +98,20 @@
 [data-day-color="wine"]{   --day-accent:#96393F; }
 [data-day-color]{
   --accent: var(--day-accent);
-  --accent-dark: color-mix(in srgb, var(--day-accent) 72%, black);
-  --accent-tint: color-mix(in srgb, var(--day-accent) 20%, var(--paper-card));
+}
+/* Derived shades only where color-mix exists — elsewhere the theme's own
+   literal dark/tint stay in force (slightly mismatched, never invisible). */
+@supports (background: color-mix(in srgb, red 50%, blue)){
+  [data-day-color]{
+    --accent-dark: color-mix(in srgb, var(--day-accent) 72%, black);
+    --accent-tint: color-mix(in srgb, var(--day-accent) 20%, var(--paper-card));
+  }
+  /* Midnight uses --accent-dark as TEXT on dark surfaces, so the day shade
+     must lighten, not darken — 62% accent toward white keeps ≥4.5:1 on the
+     dark cards for all eight palette colours. */
+  :root[data-theme="midnight"] [data-day-color]{
+    --accent-dark: color-mix(in srgb, var(--day-accent) 62%, white);
+  }
 }
 
 *{box-sizing:border-box;}
@@ -138,6 +150,11 @@ body{
   color:var(--ink);
   font-family:'Work Sans', sans-serif;
   -webkit-font-smoothing:antialiased;
+  /* viewport-fit=cover extends layout under the sensor housing on notched
+     phones (mainly landscape, where the desktop layout applies) — keep
+     content clear of it. Resolves to 0 everywhere else. */
+  padding-left:env(safe-area-inset-left);
+  padding-right:env(safe-area-inset-right);
 }
 .wrap{max-width:1180px;margin:0 auto;padding:0 20px 60px;}
 
@@ -371,6 +388,10 @@ h1.title:hover{color:var(--accent-dark);}
   border-bottom:2px dashed var(--line);
   background:var(--accent-tint);
 }
+/* Chips live in a wrapper so mobile can fold them behind a one-line summary;
+   on desktop the wrapper is invisible layout-wise and the summary is hidden. */
+.hotel-summary{ display:none; }
+.hotel-opts{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; flex:1; }
 .hotel-toggle-label{
   font-family:'IBM Plex Mono', monospace;
   font-size:11.5px;
@@ -861,7 +882,7 @@ h1.title:hover{color:var(--accent-dark);}
    ========================================================= */
 @media (max-width: 860px){
   /* Room for the fixed bottom tab bar (and the home indicator) under the page. */
-  .wrap{ padding:0 14px calc(84px + env(safe-area-inset-bottom)); }
+  .wrap{ padding:0 14px calc(72px + env(safe-area-inset-bottom)); }
 
   /* --- Top action bar: slim, sticky, thumb-agnostic (rare-use controls) --- */
   .toplinks{
@@ -898,18 +919,20 @@ h1.title:hover{color:var(--accent-dark);}
     padding:4px max(8px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
   }
   .tl-views button{
-    flex:1 1 0; min-width:0; min-height:52px;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    flex:1 1 0; min-width:0; min-height:46px;
+    display:flex; align-items:center; justify-content:center;
     border:none; border-radius:10px;
     padding:6px 2px;
-    letter-spacing:0.04em;
+    letter-spacing:0.05em;
   }
   .tl-views .ovf{ display:none; }
   #btn-more{ display:flex; }
-  .tl-views .ico{ display:block; font-size:20px; line-height:1; }
+  /* Text-only slots — icon glyphs made the bar taller than it needs to be.
+     The ID rule outranks the desktop #btn-search .ico{display:inline}. */
+  .tl-views .ico, .tl-views #btn-search .ico{ display:none; }
   .tl-views .lbl{ display:none; }
   .tl-views .lbl-s{
-    display:block; font-size:10px;
+    display:block; font-size:11px;
     max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   /* Bar order (DOM keeps desktop order for unchanged tab sequence there). */
@@ -929,7 +952,7 @@ h1.title:hover{color:var(--accent-dark);}
   }
   .sheet-panel{
     position:fixed; left:0; right:0; z-index:95;
-    bottom:calc(61px + env(safe-area-inset-bottom));
+    bottom:calc(55px + env(safe-area-inset-bottom));
     background:var(--paper-card);
     border-top:1px solid var(--line);
     border-radius:16px 16px 0 0;
@@ -955,10 +978,13 @@ h1.title:hover{color:var(--accent-dark);}
   html[data-view="bin"] #mnav-bin,
   html[data-view="ai"] #mnav-ai{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; }
 
-  /* iOS keyboard: an in-page (non-modal) input focus floats fixed bars over
-     the keyboard — hide the bottom bar for the duration. */
+  /* iOS keyboard: focusing an in-page (non-modal) TEXT field floats fixed
+     bars over the keyboard — hide the bottom bar for the duration. Text-entry
+     types only: checkboxes/radios take focus without raising a keyboard. */
   @supports selector(:has(*)){
-    body:has(.wrap input:focus, .wrap textarea:focus, .wrap select:focus) .tl-views{ display:none; }
+    body:has(.wrap input[type="text"]:focus, .wrap input[type="number"]:focus,
+             .wrap input[type="time"]:focus, .wrap input[type="date"]:focus,
+             .wrap textarea:focus) .tl-views{ display:none; }
   }
 
   header.hero{ padding:18px 14px 4px; }
@@ -967,9 +993,15 @@ h1.title:hover{color:var(--accent-dark);}
   .hero-hotels{ gap:6px; margin-top:14px; }
   .hotel-chip{ font-size:12px; padding:7px 12px; }
 
+  /* The day strip pins under the top action bar, so the current day (and its
+     date) stays readable while the schedule scrolls. Full-bleed background
+     covers content sliding beneath. */
   .daytabs{
     scroll-snap-type:x proximity;
-    padding:16px 0 8px;
+    position:sticky; top:57px; z-index:45;
+    background:var(--paper);
+    margin:0 -14px;
+    padding:6px 14px 0;
     gap:5px;
   }
   .daytab{
@@ -990,32 +1022,48 @@ h1.title:hover{color:var(--accent-dark);}
     align-items:center;
   }
   .daypanel-head .day-date-tag{ flex:0 0 auto; }
-  .reset-btn{ min-height:42px; padding:8px 10px; flex:1 1 calc(50% - 4px); font-size:11.5px; }
-  #add-location-btn{ flex:1 1 100%; }
+  /* Compact action buttons: size to their label and wrap, instead of a
+     two-per-row grid that ate three rows of screen. */
+  .reset-btn{ min-height:40px; padding:8px 11px; flex:0 1 auto; font-size:11.5px; }
 
-  .hotel-toggle{ padding:10px 16px; }
+  /* "Staying at" rests as a one-line summary; tap to unfold the chips. */
+  .hotel-toggle{ padding:6px 14px; }
+  .hotel-summary{
+    display:flex; align-items:center; gap:8px;
+    width:100%; min-height:40px;
+    background:none; border:none; padding:2px 0;
+    font-family:'IBM Plex Mono', monospace; font-size:12.5px;
+    color:var(--accent-dark); text-align:left; cursor:pointer;
+  }
+  .hotel-summary .hs-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .hs-caret{ margin-left:auto; transition:transform .15s; }
+  .hotel-toggle.open .hs-caret{ transform:rotate(180deg); }
+  .hotel-opts{ display:none; }
+  .hotel-toggle.open .hotel-opts{ display:flex; padding:2px 0 8px; }
+  .hotel-opts .hotel-toggle-label{ display:none; }  /* the summary line already says it */
   .hotel-opt{ min-height:44px; }
 
   .schedule{ padding:12px 12px 18px; }
   .mappanel{ padding:12px 12px 18px; }
 
   /* The Schedule/Map toggle stays reachable while scrolling a long day —
-     it sticks just under the top action bar. */
+     pinned below the action bar (57px) + day strip (50px), and kept slim so
+     the stacked sticky chrome doesn't crowd the screen. */
   .view-switch{
     display:flex;
     gap:6px;
-    margin:10px 0 0;
+    margin:8px 0 0;
     position:sticky;
-    top:57px;   /* just under the 57px top action bar */
+    top:107px;
     z-index:40;
     background:var(--paper-card);
-    padding:8px 0;
+    padding:6px 0;
   }
   .view-switch button{
     flex:1;
-    min-height:44px;
+    min-height:36px;
     font-family:'IBM Plex Mono', monospace;
-    font-size:12.5px;
+    font-size:11.5px;
     border:1px solid var(--line);
     background:var(--paper-card);
     color:var(--ink-soft);
@@ -1057,27 +1105,20 @@ h1.title:hover{color:var(--accent-dark);}
   .modal-content{ padding:18px 18px max(30px, calc(18px + env(safe-area-inset-bottom))); }
   .modal-title{ font-size:22px; }
   /* .modal-overlay prefix: the base .modal-close rule sits later in this
-     file, so a bare .modal-close here would lose the cascade tie. */
-  .modal-overlay .modal-close{ width:44px; height:44px; top:max(10px, env(safe-area-inset-top)); }
+     file, so a bare .modal-close here would lose the cascade tie. No top
+     inset: the sheet is bottom-anchored and never reaches the notch. */
+  .modal-overlay .modal-close{ width:44px; height:44px; }
 
-  /* 16px text inputs avoid iOS zoom-on-focus — everywhere, not just the
-     add-location form. */
-  input[type="text"], input[type="number"], input[type="time"],
-  input[type="date"], textarea{ font-size:16px; }
   .add-location-form input,
   .add-location-form select,
-  .add-location-form textarea{ min-height:44px; font-size:16px; }
+  .add-location-form textarea{ min-height:44px; font-size:16px; } /* 16px avoids iOS zoom-on-focus */
   .add-location-form button[type="submit"]{ min-height:48px; font-size:14px; }
 
-  /* Dense secondary controls get real touch sizes. */
-  .mode-opt, .ut-menu button{ min-height:44px; font-size:13px; padding:8px 12px; }
-  .ut-chip{ min-height:40px; padding:8px 12px; font-size:13px; }
-  .travel-connector.pickable{ min-height:40px; }
-  .pref-chip{ min-height:40px; padding:8px 12px; }
-  .hotel-mini-row button{ min-height:40px; padding:6px 12px; font-size:12.5px; }
   .group-controls{ gap:8px; }
   .group-label{ font-size:13px; }
-  .group-label input[type="number"]{ min-height:44px; width:64px; }
+  /* Touch-size + anti-zoom bumps for the remaining dense controls live in
+     the MOBILE LAST-WORD block at the END of this file — their base rules
+     sit later than this block, and ties are decided by document order. */
 }
 
 @media (max-width: 560px){
@@ -1450,3 +1491,35 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
 }
 .modal-notes:focus{border-style:solid; border-color:var(--ink-soft); outline:none;}
 .modal-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;}
+
+/* =========================================================
+   MOBILE LAST-WORD OVERRIDES + PRINT
+   This block must stay at the END of the file. The rules
+   here re-style controls whose base rules appear after the
+   main mobile block (mid-file), and equal-specificity ties
+   are decided by document order — moving these up is how
+   such overrides silently die.
+   ========================================================= */
+@media (max-width: 860px){
+  /* 16px text fields defeat iOS zoom-on-focus everywhere users type. */
+  input[type="text"], input[type="number"], input[type="time"],
+  input[type="date"], textarea{ font-size:16px; }
+  textarea.modal-notes{ font-size:16px; }
+  .infocard textarea.info-edit{ font-size:16px; }
+  textarea.import-area, textarea.prompt-area{ font-size:16px; }
+  .group-label input[type="number"]{ min-height:44px; width:64px; font-size:16px; }
+
+  /* Dense secondary controls get real touch sizes. */
+  .mode-opt, .ut-menu button{ min-height:44px; font-size:13px; padding:8px 12px; }
+  .ut-chip{ min-height:40px; padding:8px 12px; font-size:13px; }
+  .travel-connector.pickable{ min-height:40px; }
+  .pref-chip{ min-height:40px; padding:8px 12px; }
+  .hotel-mini-row button{ min-height:40px; padding:6px 12px; font-size:12.5px; }
+}
+
+/* Paper gets no navigation chrome: A4/Letter page widths match the ≤860px
+   query, which would otherwise stamp the fixed tab bar over every page. */
+@media print{
+  .toplinks, .tl-views, #more-sheet{ display:none !important; }
+  .wrap{ padding-bottom:0; }
+}
