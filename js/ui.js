@@ -7,8 +7,8 @@
    ========================================================= */
 
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
-import { CATEGORIES, DEFAULT_DUR, THEMES, newDay, serializeTrip, importText, blankTrip } from './format.js';
-import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, forgetRoomCache } from './state.js';
+import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, newDay, serializeTrip, importText, blankTrip } from './format.js';
+import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, forgetRoomCache, rememberPane } from './state.js';
 import { computeSchedule, getHotel } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
@@ -110,6 +110,7 @@ function renderTabs(){
   trip().days.forEach((d, i) => {
     const btn = document.createElement('div');
     btn.className = 'daytab' + (i === state.currentDayIndex ? ' active' : '');
+    if(d.color && DAY_COLORS[d.color]) btn.dataset.dayColor = d.color;
     btn.draggable = true;
     btn.tabIndex = 0;
     btn.title = 'Drag to reorder the trip (or focus and press Shift + ← / →)';
@@ -179,6 +180,14 @@ function renderTabs(){
     moveDay(parseInt(e.dataTransfer.getData(DAY_DND), 10), trip().days.length);
   });
   el.appendChild(add);
+
+  // Keep the active tab in view when the strip scrolls (mobile). Horizontal
+  // scroll on the strip only — scrollIntoView could also scroll the page.
+  const active = el.querySelector('.daytab.active');
+  if(active && el.scrollWidth > el.clientWidth){
+    const target = active.offsetLeft - (el.clientWidth - active.offsetWidth) / 2;
+    el.scrollLeft = Math.max(0, Math.min(target, el.scrollWidth - el.clientWidth));
+  }
 }
 
 /* Move the day at `from` so it lands at index `to` of the *current* list
@@ -217,6 +226,10 @@ function moveDay(from, to){
 function renderDayPanel(){
   const day = currentDay();
   const panel = $('daypanel');
+  // The whole panel adopts the day's colour: every var(--accent*) inside —
+  // tabs aside — follows via the [data-day-color] CSS variable overrides.
+  if(day.color && DAY_COLORS[day.color]) panel.dataset.dayColor = day.color;
+  else delete panel.dataset.dayColor;
   const sched = computeSchedule(trip(), day);
   const date = sched.date;
 
@@ -284,6 +297,7 @@ function renderDayPanel(){
   const btnMap = $('switch-map');
   function applyPaneMode(mode){
     state.mobilePane = mode;
+    rememberPane(mode);
     body.classList.toggle('show-list', mode === 'list');
     body.classList.toggle('show-map', mode === 'map');
     btnList.classList.toggle('active', mode === 'list');
@@ -550,9 +564,13 @@ function renderScheduleList(day, sched){
         } else {
           lastTarget = null;
         }
+        // The bottom auto-scroll zone sits above the fixed mobile nav bar,
+        // otherwise the bar swallows the entire hot zone.
+        const nav = document.querySelector('.tl-views');
+        const navH = nav && getComputedStyle(nav).position === 'fixed' ? nav.offsetHeight : 0;
         const margin = 70;
         if(mv.clientY < margin) window.scrollBy(0, -12);
-        else if(mv.clientY > window.innerHeight - margin) window.scrollBy(0, 12);
+        else if(mv.clientY > window.innerHeight - navH - margin) window.scrollBy(0, 12);
       };
       const onUp = () => {
         document.removeEventListener('pointermove', onMove);
@@ -856,9 +874,11 @@ function renderMap(day, sched){
     pts.push([hotel.lat, hotel.lng]);
   }
 
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C1502E';
+  // Read from the panel, not the root: the panel may carry a per-day colour
+  // override on --accent (data-day-color), which the polylines must follow.
+  const accent = getComputedStyle($('daypanel')).getPropertyValue('--accent').trim() || '#C1502E';
   const boundPts = pts.slice();
-  const gold = getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#B8891F';
+  const gold = getComputedStyle($('daypanel')).getPropertyValue('--gold').trim() || '#B8891F';
   segs.forEach(seg => {
     const color = seg.hike ? gold : accent;   // hikes draw in the accent-gold so they read as "on foot, on purpose"
     if(seg.path && seg.path.length > 1){
@@ -1079,11 +1099,35 @@ function submitLocationForm(e){
 /* =========================================================
    DAY EDIT
    ========================================================= */
+/* Day-colour picker inside the Edit-day modal: one "Theme" swatch (follow
+   the theme accent, i.e. color:null) plus the DAY_COLORS palette. */
+let deColor = null;
+function renderDayColorRow(){
+  const row = $('de-color-row');
+  if(!row) return;
+  row.innerHTML = '';
+  const mk = (key, label, swatchColor) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'day-color-swatch' + (deColor === key ? ' active' : '') + (swatchColor ? '' : ' none');
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', deColor === key ? 'true' : 'false');
+    if(swatchColor) b.style.setProperty('--sw', swatchColor);
+    b.innerHTML = '<span class="sw-dot"></span><span class="sw-name">' + esc(label) + '</span>';
+    b.addEventListener('click', () => { deColor = key; renderDayColorRow(); });
+    row.appendChild(b);
+  };
+  mk(null, 'Theme', null);
+  Object.entries(DAY_COLORS).forEach(([key, c]) => mk(key, c.name, c.accent));
+}
+
 function openDayEdit(dayIndex){
   const day = trip().days[dayIndex];
   $('de-index').value = String(dayIndex);
   $('de-title').value = day.title;
   $('de-start').value = day.start;
+  deColor = DAY_COLORS[day.color] ? day.color : null;
+  renderDayColorRow();
   const sel = $('de-hotel');
   sel.innerHTML = `<option value="">No hotel</option>` +
     trip().hotels.map(h => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join('');
@@ -1123,6 +1167,7 @@ function submitDayEdit(e){
   day.start = $('de-start').value || day.start;
   day.hotelId = $('de-hotel').value || null;
   day.bookend = ['start','end'].includes($('de-bookend').value) ? $('de-bookend').value : 'both';
+  day.color = DAY_COLORS[deColor] ? deColor : null;
   saveState();
   closeDayEdit();
   renderAll();
@@ -1519,6 +1564,7 @@ export function renderAllStops(){
   t.days.forEach(d => {
     const head = document.createElement('div');
     head.className = 'all-day-head';
+    if(d.color && DAY_COLORS[d.color]) head.dataset.dayColor = d.color;
     head.textContent = 'Day ' + d.id + ' — ' + d.title + ' (' + d.order.length + ')';
     wireHeadDrop(head, { type:'day', dayId: d.id });
     el.appendChild(head);
@@ -1634,6 +1680,7 @@ function renderDayMapsOverlay(plan, opts){
     const over = sched.rows.length && sched.returnTime > 22 * 60 + 30;
     const el = document.createElement('div');
     el.className = 'ap-day';
+    if(day.color && DAY_COLORS[day.color]) el.dataset.dayColor = day.color;
     el.innerHTML = `
       <div class="ap-head">
         <b>Day ${day.id}${day.title && day.title !== 'Day ' + day.id ? ' — ' + esc(shortTitle(day.title)) : ''}</b> · ${day.order.length} stop${day.order.length === 1 ? '' : 's'}
@@ -1654,7 +1701,10 @@ function renderDayMapsOverlay(plan, opts){
     if(typeof L === 'undefined') return;
     plan.days.forEach((day, i) => {
       const elId = 'ap-map-' + i;
-      if(!document.getElementById(elId)) return;
+      const mapEl = document.getElementById(elId);
+      if(!mapEl) return;
+      // The card may carry a per-day colour override on --accent.
+      const dayAccent = getComputedStyle(mapEl).getPropertyValue('--accent').trim() || accent;
       const m = L.map(elId, { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
       const pts = [];
@@ -1678,7 +1728,7 @@ function renderDayMapsOverlay(plan, opts){
         pts.push([h.lat, h.lng]);
       }
       if(pts.length > 1){
-        L.polyline(pts, { color: accent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
+        L.polyline(pts, { color: dayAccent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
         m.fitBounds(pts, { padding: [14, 14], maxZoom: 15 });
       } else if(pts.length === 1) m.setView(pts[0], 14);
       else m.setView([30, 10], 1);
@@ -2033,6 +2083,10 @@ export function renderCloudUI(){
     chip.textContent = cloud.status === 'error' ? '⚠ Sync problem'
       : cloud.status === 'connecting' ? '◌ Connecting…'
       : cloud.note ? '↻ Updated elsewhere' : '● Shared';
+    // Mobile renders the chip glyph-only off this attribute (text stays for desktop).
+    chip.dataset.state = cloud.status === 'error' ? 'error'
+      : cloud.status === 'connecting' ? 'connecting'
+      : cloud.note ? 'note' : 'ok';
   }
   const stateEl = $('cloud-state');
   if(!stateEl) return;
@@ -2188,6 +2242,9 @@ function clearTrip(){
    ========================================================= */
 export function setView(view){
   state.currentView = view;
+  // Mirrored on the root so CSS can light up the mobile "More" tab and
+  // sheet rows for views whose buttons are folded away on small screens.
+  document.documentElement.dataset.view = view;
   ['days','all','bin','optional','info','ai'].forEach(v => {
     $('btn-view-' + v).classList.toggle('active', view === v);
     $('view-' + v).classList.toggle('hidden', view !== v);
@@ -2252,6 +2309,23 @@ export function wireStaticHandlers(){
   on('btn-view-optional', 'click', () => setView('optional'));
   on('btn-view-info', 'click', () => setView('info'));
   on('btn-view-ai', 'click', () => setView('ai'));
+
+  // Mobile "More" sheet — proxy rows for views folded out of the bottom bar.
+  const moreSheet = $('more-sheet');
+  const setMore = (open) => {
+    if(!moreSheet) return;
+    moreSheet.hidden = !open;
+    const btn = $('btn-more');
+    if(btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  on('btn-more', 'click', () => setMore(moreSheet && moreSheet.hidden));
+  on('more-backdrop', 'click', () => setMore(false));
+  [['mnav-optional','optional'], ['mnav-bin','bin'], ['mnav-ai','ai']].forEach(([id, view]) =>
+    on(id, 'click', () => { setMore(false); setView(view); }));
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape' && moreSheet && !moreSheet.hidden) setMore(false);
+  });
+  document.documentElement.dataset.view = state.currentView;
   on('group-btn', 'click', autoPlanPreview);
   on('map-preview-btn', 'click', previewCurrentRoutes);
   on('auto-plan-close', 'click', closeAutoPlan);

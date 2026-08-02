@@ -6,7 +6,7 @@
    aren't worth the bugs.
    ========================================================= */
 
-import { blankTrip, isValidTrip } from './format.js';
+import { blankTrip, isValidTrip, DAY_COLORS } from './format.js';
 
 /* Persistence model: a trip is only SAVED once it's shared.
    - Unshared work-in-progress lives in sessionStorage: an accidental reload
@@ -23,11 +23,20 @@ function currentRoomCode(){
   return m ? m[1] : null;
 }
 
+/* The Schedule/Map pane choice survives reloads — someone following the map
+   on foot shouldn't land back on the list every time the page reopens. */
+function savedPane(){
+  try{ return localStorage.getItem('travelPlanner_pane_v1') === 'map' ? 'map' : 'list'; } catch(e){ return 'list'; }
+}
+export function rememberPane(pane){
+  try{ localStorage.setItem('travelPlanner_pane_v1', pane); } catch(e){}
+}
+
 export const state = {
   trip: blankTrip(),
   currentDayIndex: 0,
   currentView: 'days',    // 'days' | 'all' | 'bin' | 'optional' | 'info' | 'ai'
-  mobilePane: 'list',
+  mobilePane: savedPane(),
   undoStack: [],
 };
 
@@ -54,6 +63,7 @@ export function normalizeTrip(t){
     hotelId: d.hotelId || null,
     bookend: ['start','end'].includes(d.bookend) ? d.bookend : 'both',
     returnBy: ['walk','cycle','transit','taxi','boat'].includes(d.returnBy) ? d.returnBy : null,
+    color: DAY_COLORS[d.color] ? d.color : null,
     order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
   }));
   if(!trip.days.length) trip.days = base.days;
