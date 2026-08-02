@@ -1093,7 +1093,8 @@ h1.title:hover{color:var(--accent-dark);}
   .bin-row .restore-to-day{ flex:1 1 auto; min-height:40px; }
   .bin-row .restore-btn{ min-height:40px; padding:8px 16px; }
 
-  .infogrid{ padding:16px 16px 22px; grid-template-columns:1fr; gap:12px; }
+  /* Trip Info / checklist mobile rules live in the LAST-WORD block at the end
+     of this file — their base rules sit later than this block. */
 
   .modal-overlay{ padding:0; align-items:flex-end; }
   /* overscroll-behavior stops the sheet's scroll chaining into the page
@@ -1266,25 +1267,74 @@ h1.title:hover{color:var(--accent-dark);}
 .map-pin span{transform:rotate(45deg);}
 
 /* ---------- Info tab ---------- */
+/* Trip Info is prose. The old 260px auto-fit grid made 4 narrow columns —
+   every note became a tall, hard-to-scan ribbon. Now: full-width cards stack,
+   and the five notes flow through two balanced text columns, so a short note
+   never leaves a hole beside a long one. (#aigrid shares this class; all its
+   cards are full width, so they simply stack.) */
 .infogrid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit, minmax(260px,1fr));
+  display:flex;
+  flex-direction:column;
   gap:14px;
   padding:20px 22px 26px;
+}
+.info-notes{
+  columns:2;
+  column-gap:14px;
+}
+.info-notes .infocard{
+  break-inside:avoid;
+  margin:0 0 14px;
 }
 .infocard{
   background:var(--card);
   border:1px solid var(--line);
   border-radius:10px;
-  padding:16px;
+  padding:16px 18px 18px;
 }
 .infocard h3{
   font-family:'Fraunces', serif;
   font-size:16px;
-  margin:0 0 8px;
+  margin:0 0 10px;
+  display:flex; align-items:center; gap:8px;
+  padding-bottom:8px;
+  border-bottom:1px dashed var(--line);
 }
+.ic-icon{ font-size:15px; line-height:1; }
+.ic-count{
+  font-family:'IBM Plex Mono', monospace; font-size:10.5px;
+  text-transform:uppercase; letter-spacing:0.06em;
+  background:var(--accent-tint); color:var(--accent-dark);
+  border-radius:999px; padding:3px 9px;
+}
+.ic-edit{
+  margin-left:auto;
+  font-family:'IBM Plex Mono', monospace; font-size:10.5px;
+  background:none; border:1px solid var(--line); color:var(--ink-soft);
+  border-radius:999px; padding:4px 10px; cursor:pointer;
+}
+.ic-edit:hover{ border-color:var(--accent); color:var(--accent-dark); }
 .infocard p, .infocard li{font-size:13px;color:var(--ink-soft);line-height:1.5;}
 .infocard ul{margin:0;padding-left:18px;}
+
+/* ---------- Info notes: formatted read view, textarea on click ---------- */
+.info-read{ cursor:text; border-radius:8px; margin:-4px; padding:4px; }
+.info-read:hover{ background:var(--paper-card); }
+.info-read > p{ margin:0 0 9px; }
+.info-read > p:last-child{ margin-bottom:0; }
+.info-read > ul{ margin:0 0 9px; padding-left:17px; }
+.info-read > ul:last-child{ margin-bottom:0; }
+.info-read li{ margin-bottom:3px; }
+.info-read li::marker{ color:var(--accent); }
+.info-read strong{ color:var(--ink); font-weight:600; }
+/* A fully-bold source line acts as a heading for the list under it */
+.info-read .info-lead{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px; text-transform:uppercase; letter-spacing:0.05em;
+  color:var(--ink); margin:12px 0 6px;
+}
+.info-read .info-lead:first-child{ margin-top:0; }
+.info-read .info-empty{ color:var(--ink-soft); font-style:italic; opacity:.75; margin:0; }
 .infocard textarea.info-edit{
   width:100%;
   font-family:'Work Sans', sans-serif;
@@ -1296,9 +1346,51 @@ h1.title:hover{color:var(--accent-dark);}
   border-radius:8px;
   padding:10px;
   resize:vertical;
-  min-height:90px;
+  min-height:120px;
 }
 .infocard textarea.info-edit:focus{border-style:solid; border-color:var(--ink-soft); outline:none;}
+
+/* ---------- Checklist ---------- */
+.check-add{ display:flex; gap:8px; margin-bottom:12px; }
+.check-add input{
+  flex:1; min-width:0;
+  font-family:'Work Sans', sans-serif; font-size:13.5px;
+  background:var(--paper-card); color:var(--ink);
+  border:1px dashed var(--line); border-radius:8px;
+  padding:9px 12px;
+}
+.check-add input:focus{ border-style:solid; border-color:var(--ink-soft); outline:none; }
+.check-add .reset-btn{ flex:none; }
+.check-list{ display:flex; flex-direction:column; }
+.check-row{
+  display:flex; align-items:center; gap:10px;
+  padding:9px 4px;
+  border-bottom:1px dashed var(--line);
+}
+.check-row:last-child{ border-bottom:none; }
+.check-box{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer; }
+.check-box input[type="checkbox"]{ width:19px; height:19px; flex:none; accent-color:var(--accent); cursor:pointer; }
+.check-text{ font-size:14px; color:var(--ink); line-height:1.4; overflow-wrap:anywhere; }
+.check-del{
+  flex:none; background:none; border:none; cursor:pointer;
+  color:var(--ink-soft); font-size:14px; padding:4px 8px; border-radius:6px;
+}
+.check-del:hover{ color:var(--danger); background:var(--paper-card); }
+.check-empty{ font-style:italic; opacity:.8; margin:2px 0 0; }
+.check-done-note{ margin:12px 0 0; padding-top:10px; border-top:1px dashed var(--line); font-size:12.5px; }
+
+/* ---------- Bin sections ---------- */
+.bin-head{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px; text-transform:uppercase; letter-spacing:0.07em;
+  color:var(--ink-soft);
+  padding:6px 2px 8px;
+  margin-top:14px;
+  border-bottom:1px dashed var(--line);
+}
+.bin-list > .bin-head:first-child{ margin-top:0; }
+.check-bin-row .stop-illustration{ background:linear-gradient(155deg, var(--accent), var(--accent-dark)) !important; }
+.check-bin-row .stop-name.done{ text-decoration:line-through; color:var(--ink-soft); margin:0; }
 .import-area{
   width:100%;
   font-family:'IBM Plex Mono', monospace;
@@ -1514,7 +1606,27 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .ut-chip{ min-height:40px; padding:8px 12px; font-size:13px; }
   .travel-connector.pickable{ min-height:40px; }
   .pref-chip{ min-height:40px; padding:8px 12px; }
-  .hotel-mini-row button{ min-height:40px; padding:6px 12px; font-size:12.5px; }
+  /* Name on its own line, both buttons on the next — at 44px targets they
+     no longer fit beside the name and used to break one-per-row. */
+  .hotel-mini-row{ padding:10px 0; }
+  .hotel-mini-row .h-name{ flex:1 1 100%; min-width:0; }
+  .hotel-mini-row button{ min-height:40px; padding:6px 14px; font-size:12.5px; flex:0 0 auto; }
+
+  /* Trip Info + checklist */
+  .infogrid{ padding:16px 14px 22px; gap:12px; }
+  .info-notes{ columns:1; }
+  .info-notes .infocard{ margin:0 0 12px; }
+  .info-notes .infocard:last-child{ margin-bottom:0; }
+  .infocard{ padding:14px 14px 16px; }
+  /* Input and Add stay on one line — a full-width button below the field
+     wasted a whole row. */
+  .check-add{ flex-wrap:nowrap; }
+  .check-add input{ flex:1 1 auto; min-width:0; min-height:44px; }
+  .check-add .reset-btn{ flex:0 0 auto; min-height:44px; padding:8px 14px; }
+  .check-row{ padding:11px 2px; }
+  .check-box input[type="checkbox"]{ width:23px; height:23px; }
+  .check-del{ min-width:44px; min-height:44px; font-size:16px; }
+  .ic-edit{ min-height:32px; padding:6px 12px; }
 }
 
 /* Paper gets no navigation chrome: A4/Letter page widths match the ≤860px
