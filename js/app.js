@@ -2,7 +2,7 @@
    APP ENTRY — load state, wire the UI, attach cloud sync.
    ========================================================= */
 
-import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook } from './state.js';
+import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook, backupRoomCache } from './state.js';
 import { initCloud, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
 import { renderAll, renderInfo, renderAiPlan, renderCloudUI, wireStaticHandlers, applyTheme, setView } from './ui.js';
 
@@ -29,6 +29,7 @@ initCloud({
   getTrip: () => state.trip,
   onStatus: renderCloudUI,
   onRemoteTrip: (t) => {
+    backupRoomCache(t); // an emptied room syncing down leaves a recoverable copy
     state.trip = normalizeTrip(t);
     persistLocal();     // not saveState() — that would echo the change back up
     applyTheme();

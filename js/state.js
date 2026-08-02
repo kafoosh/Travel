@@ -80,10 +80,29 @@ export function persistLocal(){
   } catch(e){ console.warn('Could not save trip', e); }
 }
 
+/* Called before an incoming remote trip replaces the local one: if the
+   incoming copy has no content while the current one does (an emptied or
+   clobbered room syncing down), keep the current copy under a side key.
+   Nothing in the app reads it — it exists so a wiped trip can be recovered
+   by hand from localStorage ('travelPlanner_room_<code>_backup'). */
+export function backupRoomCache(incoming){
+  try{
+    const code = currentRoomCode();
+    if(!code) return;
+    const content = t => t ? Object.keys(t.stops || {}).length + (t.hotels || []).length : 0;
+    if(content(state.trip) && !content(incoming))
+      localStorage.setItem(ROOM_PREFIX + code + '_backup', JSON.stringify({ trip: state.trip, savedAt: Date.now() }));
+  } catch(e){ console.warn('Could not back up trip', e); }
+}
+
 /* Drop the offline cache for a room — used when its shared copy is deleted,
-   so the code can't be resurrected from this browser. */
+   so the code can't be resurrected from this browser. Takes the safety
+   backup with it. */
 export function forgetRoomCache(code){
-  try{ localStorage.removeItem(ROOM_PREFIX + code); } catch(e){}
+  try{
+    localStorage.removeItem(ROOM_PREFIX + code);
+    localStorage.removeItem(ROOM_PREFIX + code + '_backup');
+  } catch(e){}
 }
 
 let cloudPushHook = null;
