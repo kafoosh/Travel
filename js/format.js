@@ -22,8 +22,10 @@ export const THEMES = ['parchment','lagoon','terracotta','midnight','field-notes
 /* Day colour palette: named accents a day can adopt so different cities or
    areas read apart at a glance. The key is what's persisted (`- color: teal`);
    only the accent hex lives here — dark/tint shades are derived in CSS with
-   color-mix so they track whichever theme is active. */
-export const DAY_COLORS = {
+   color-mix so they track whichever theme is active.
+   Null prototype: keys are validated with plain `DAY_COLORS[value]` lookups
+   in four modules, so inherited names ('constructor', …) must not pass. */
+export const DAY_COLORS = Object.assign(Object.create(null), {
   rust:   { name:'Rust',   accent:'#C1502E' },
   gold:   { name:'Gold',   accent:'#B8891F' },
   olive:  { name:'Olive',  accent:'#77813B' },
@@ -32,7 +34,7 @@ export const DAY_COLORS = {
   sea:    { name:'Sea',    accent:'#3D6486' },
   plum:   { name:'Plum',   accent:'#7C4A6B' },
   wine:   { name:'Wine',   accent:'#96393F' },
-};
+});
 
 export function newDay(n){
   // bookend: which ends of the day the hotel anchors — 'both' | 'start' | 'end'
