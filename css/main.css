@@ -84,8 +84,14 @@ html{scroll-behavior:smooth;}
    Grid/flex children default to min-width:auto, so a single
    wide child (notably <select>) can force a track wider than
    the viewport and push the page into horizontal overflow.
+
+   `clip`, not `hidden`: overflow-x:hidden turns the element
+   into a scroll container, which silently disables every
+   position:sticky descendant (the Day by Day map). `clip`
+   contains the same overflow without doing that; `hidden`
+   stays first as the fallback for older browsers.
    ========================================================= */
-html, body{ max-width:100%; overflow-x:hidden; }
+html, body{ max-width:100%; overflow-x:hidden; overflow-x:clip; }
 .daypanel-body, .daypanel-body > *,
 .schedule, .mappanel,
 .stop-card, .stop-main, .bin-row, .manage-row,
@@ -252,7 +258,10 @@ h1.title:hover{color:var(--accent-dark);}
   border:1px solid var(--line);
   border-radius:0 12px 12px 12px;
   box-shadow:var(--shadow);
+  /* clip, not hidden — hidden would make this a scroll container and
+     disable the sticky map inside (see OVERFLOW CONTAINMENT above) */
   overflow:hidden;
+  overflow:clip;
 }
 .viewpanel{margin-top:22px; border-radius:12px;}
 .daypanel-head{

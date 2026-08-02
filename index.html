@@ -50,6 +50,7 @@
           </label>
           <label class="group-label check"><input type="checkbox" id="group-include-optional"> include Unassigned</label>
           <button class="reset-btn" id="group-btn" title="Group stops by proximity and what realistically fits each day, then preview the result before accepting">✨ Auto-plan</button>
+          <button class="reset-btn" id="map-preview-btn" title="See every day's current route on a mini map, side by side">🗺 Day maps</button>
           <button class="reset-btn" id="all-add-btn">+ Add location</button>
         </div>
       </div>
@@ -214,12 +215,12 @@
   </div>
 </div>
 
-<!-- Auto-plan preview modal -->
+<!-- Day-maps preview modal: auto-plan proposals and current-route previews -->
 <div class="modal-overlay" id="auto-plan-overlay">
   <div class="modal-box ap-box">
     <button class="modal-close" id="auto-plan-close" aria-label="Close">✕</button>
     <div class="modal-content">
-      <h3 class="modal-title">Auto-plan preview</h3>
+      <h3 class="modal-title" id="ap-title">Auto-plan preview</h3>
       <p class="ap-sub" id="ap-sub"></p>
       <div id="ap-days" class="ap-days"></div>
       <div class="modal-actions ap-actions">

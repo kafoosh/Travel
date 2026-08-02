@@ -1595,14 +1595,37 @@ function autoPlanPreview(){
   const { orders } = autoPlanOrders(plan);
   plan.days.forEach(d => { if(orders[d.id]) d.order = orders[d.id]; });
   pendingPlan = plan;
-  renderAutoPlanPreview(plan);
+  renderDayMapsOverlay(plan, {
+    title: 'Auto-plan preview',
+    sub: 'Stops grouped by proximity and what realistically fits each day (visit lengths + travel + hotel legs). Check each day below — nothing changes until you accept.',
+    accept: true,
+  });
 }
 
-function renderAutoPlanPreview(plan){
+/* "Day maps" in All Stops: the same per-day mini-maps as the auto-plan
+   preview, but showing the trip exactly as it stands — every day's route
+   at a glance without tabbing through Day by Day. */
+function previewCurrentRoutes(){
+  const t = trip();
+  if(!t.days.some(d => d.order.length)){ alert('No stops on any day yet — add some locations first.'); return; }
+  pendingPlan = null;
+  renderDayMapsOverlay(t, {
+    title: 'Day routes as planned',
+    sub: 'Every day side by side, stops in their current order with the times they work out to. Nothing changes from here.',
+    accept: false,
+  });
+}
+
+/* One overlay, two uses: a proposed auto-plan (accept / keep current) or a
+   read-only look at the days as they stand. `plan` is only read. */
+function renderDayMapsOverlay(plan, opts){
   destroyApMaps();
   const wrap = $('ap-days');
   wrap.innerHTML = '';
-  $('ap-sub').textContent = 'Stops grouped by proximity and what realistically fits each day (visit lengths + travel + hotel legs). Check each day below — nothing changes until you accept.';
+  $('ap-title').textContent = opts.title;
+  $('ap-sub').textContent = opts.sub;
+  $('ap-accept').classList.toggle('hidden', !opts.accept);
+  $('ap-cancel').textContent = opts.accept ? 'Keep my current plan' : 'Close';
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#C1502E';
 
   const scheds = plan.days.map(d => computeSchedule(plan, d));
@@ -1613,7 +1636,7 @@ function renderAutoPlanPreview(plan){
     el.className = 'ap-day';
     el.innerHTML = `
       <div class="ap-head">
-        <b>Day ${day.id}</b> · ${day.order.length} stop${day.order.length === 1 ? '' : 's'}
+        <b>Day ${day.id}${day.title && day.title !== 'Day ' + day.id ? ' — ' + esc(shortTitle(day.title)) : ''}</b> · ${day.order.length} stop${day.order.length === 1 ? '' : 's'}
         ${sched.rows.length ? ' · ' + formatTime(parseTime(day.start)) + ' – ' + formatTime(sched.returnTime) : ''}
         ${sched.walkKm > 0.05 ? ' · 🚶 ' + sched.walkKm.toFixed(1) + ' km' : ''}
         ${over ? ' <span class="late-chip">⚠ runs late — consider more days</span>' : ''}
@@ -1647,7 +1670,12 @@ function renderAutoPlanPreview(plan){
         pts.push([s.lat, s.lng]);
       });
       if(scheds[i].hotel && scheds[i].hotel.lat != null && pts.length){
-        pts.push([scheds[i].hotel.lat, scheds[i].hotel.lng]);
+        const h = scheds[i].hotel;
+        L.marker([h.lat, h.lng], { icon: L.divIcon({
+          className: '', html: '<div class="map-pin hotel-pin ap-pin"><span>' + (h.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
+          iconSize: [20, 20], iconAnchor: [10, 10]
+        })}).addTo(m);
+        pts.push([h.lat, h.lng]);
       }
       if(pts.length > 1){
         L.polyline(pts, { color: accent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
@@ -2225,6 +2253,7 @@ export function wireStaticHandlers(){
   on('btn-view-info', 'click', () => setView('info'));
   on('btn-view-ai', 'click', () => setView('ai'));
   on('group-btn', 'click', autoPlanPreview);
+  on('map-preview-btn', 'click', previewCurrentRoutes);
   on('auto-plan-close', 'click', closeAutoPlan);
   on('ap-cancel', 'click', closeAutoPlan);
   on('ap-accept', 'click', acceptAutoPlan);
