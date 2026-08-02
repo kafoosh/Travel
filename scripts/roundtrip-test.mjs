@@ -44,6 +44,7 @@ colosseum.notes = 'Booked 09:20 entry\nRef ABC-123';
 colosseum.fixedStart = '09:20';
 trip.days[0].hotelId = 'h1';            // arrival day: hotel at the end only
 trip.days[0].bookend = 'end';
+trip.days[0].color = 'teal';            // per-day colour (palette key)
 const hikeId = 'u999';
 trip.stops[hikeId] = { id: hikeId, name: 'Sentiero degli Dei', cat: 'hike', dur: 240,
   lat: 40.6262, lng: 14.5326, endLat: 40.6140, endLng: 14.4780, fixedStart: null,
@@ -54,6 +55,11 @@ const c2 = Object.values(t2.stops).find(s => s.name === 'Colosseum');
 check('multi-line notes survive', c2.notes === colosseum.notes);
 check('fixed start survives', c2.fixedStart === '09:20');
 check('day bookend survives', t2.days[0].bookend === 'end');
+check('day colour survives', t2.days[0].color === 'teal');
+check('unknown day colour is dropped', (() => {
+  const bad = parseTrip(serializeTrip(trip).replace('- color: teal', '- color: neon')).trip;
+  return bad.days[0].color === null;
+})());
 check('arrive-by survives', (() => {
   colosseum.arriveBy = 'taxi';
   trip.days[1].returnBy = 'cycle';

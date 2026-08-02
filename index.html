@@ -2,7 +2,7 @@
 <html lang="en" data-theme="parchment">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Travel Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -18,20 +18,46 @@
   <h1 class="title" id="trip-title" title="Click to edit trip settings"></h1>
   <p class="hero-sub" id="trip-subtitle"></p>
   <div class="hero-hotels" id="hero-hotels"></div>
-  <div class="toplinks">
-    <button id="btn-view-days" class="active">Day by Day</button>
-    <button id="btn-view-all">All Stops</button>
-    <button id="btn-view-optional">Unassigned</button>
-    <button id="btn-view-bin">Bin</button>
-    <button id="btn-view-info">Trip Info</button>
-    <button id="btn-view-ai">AI Plan</button>
-    <button id="btn-search" title="Search the itinerary (press /)">🔍 Search</button>
-    <button id="btn-settings" title="Trip settings">⚙ Settings</button>
-    <button id="undo-btn" title="Undo last change" disabled>↺ Undo</button>
+</header>
+
+<!-- Navigation lives OUTSIDE the hero: position:sticky can't escape its
+     parent, so inside the header the mobile bar could only ever stick for
+     the hero's bottom padding. Out here it sticks for real.
+     Desktop: one row — view tabs, then a quieter icon-only actions cluster.
+     Mobile: .tl-views becomes a fixed bottom tab bar (Days/Stops/Search/
+     Info/More), .tl-actions a slim sticky top bar. Bin, Unassigned and
+     AI Plan fold into the More sheet via the mnav-* proxy buttons.
+     save-share-btn and cloud-chip keep plain text nodes — renderCloudUI
+     rewrites their textContent, so they must never gain child spans. -->
+<div class="toplinks">
+  <nav class="tl-views" aria-label="Views">
+    <button id="btn-view-days" class="active"><span class="ico" aria-hidden="true">🗓</span><span class="lbl">Day by Day</span><span class="lbl-s">Days</span></button>
+    <button id="btn-view-all"><span class="ico" aria-hidden="true">📍</span><span class="lbl">All Stops</span><span class="lbl-s">Stops</span></button>
+    <button id="btn-view-optional" class="ovf">Unassigned</button>
+    <button id="btn-view-bin" class="ovf">Bin</button>
+    <button id="btn-view-info"><span class="ico" aria-hidden="true">ℹ️</span><span class="lbl">Trip Info</span><span class="lbl-s">Info</span></button>
+    <button id="btn-view-ai" class="ovf">AI Plan</button>
+    <button id="btn-search" title="Search the itinerary (press /)"><span class="ico" aria-hidden="true">🔍</span><span class="lbl">Search</span><span class="lbl-s">Search</span></button>
+    <button id="btn-more" aria-expanded="false" aria-controls="more-sheet" title="More"><span class="ico" aria-hidden="true">⋯</span><span class="lbl-s">More</span></button>
+  </nav>
+  <div class="tl-actions">
+    <button id="btn-settings" title="Trip settings"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Settings</span></button>
+    <button id="undo-btn" title="Undo last change" disabled><span class="ico" aria-hidden="true">↺</span><span class="lbl">Undo</span></button>
     <button id="save-share-btn" title="Save this trip to the cloud and get a shareable link">💾 Save</button>
     <button id="cloud-chip" class="hidden" title="Sync status — opens Trip Info">● Shared</button>
   </div>
-</header>
+</div>
+
+<!-- Mobile "More" sheet: proxy rows for the views folded out of the bottom
+     bar. Rows just call setView; active state comes from html[data-view]. -->
+<div id="more-sheet" hidden>
+  <div class="sheet-backdrop" id="more-backdrop"></div>
+  <div class="sheet-panel" role="menu" aria-label="More views">
+    <button id="mnav-optional" role="menuitem">🎒 Unassigned</button>
+    <button id="mnav-bin" role="menuitem">🗑 Bin</button>
+    <button id="mnav-ai" role="menuitem">✨ AI Plan</button>
+  </div>
+</div>
 
 <div class="wrap">
 
@@ -175,6 +201,9 @@
             <option value="end">End only (arrive during the day, return here)</option>
           </select>
         </label>
+        <label>Day colour</label>
+        <div class="day-color-row" id="de-color-row" role="radiogroup" aria-label="Day colour"></div>
+        <p class="al-hint">Give days in different cities or areas their own colour — the day's tab, pins, routes and highlights all follow it.</p>
         <label>Position in the trip</label>
         <div class="cloud-btn-row">
           <button type="button" class="reset-btn" id="de-earlier">← Move earlier</button>

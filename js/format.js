@@ -19,9 +19,25 @@ export const DEFAULT_DUR = {
 
 export const THEMES = ['parchment','lagoon','terracotta','midnight','field-notes'];
 
+/* Day colour palette: named accents a day can adopt so different cities or
+   areas read apart at a glance. The key is what's persisted (`- color: teal`);
+   only the accent hex lives here — dark/tint shades are derived in CSS with
+   color-mix so they track whichever theme is active. */
+export const DAY_COLORS = {
+  rust:   { name:'Rust',   accent:'#C1502E' },
+  gold:   { name:'Gold',   accent:'#B8891F' },
+  olive:  { name:'Olive',  accent:'#77813B' },
+  forest: { name:'Forest', accent:'#3E6B4F' },
+  teal:   { name:'Teal',   accent:'#2E6E71' },
+  sea:    { name:'Sea',    accent:'#3D6486' },
+  plum:   { name:'Plum',   accent:'#7C4A6B' },
+  wine:   { name:'Wine',   accent:'#96393F' },
+};
+
 export function newDay(n){
   // bookend: which ends of the day the hotel anchors — 'both' | 'start' | 'end'
-  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', returnBy:null, order:[] };
+  // color: a DAY_COLORS key, or null to follow the theme accent
+  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', returnBy:null, color:null, order:[] };
 }
 
 export function blankTrip(){
@@ -102,6 +118,7 @@ export function serializeTrip(trip){
     L.push('- hotel: ' + (hotel ? hotel.name : 'none'));
     if(hotel && d.bookend && d.bookend !== 'both') L.push('- hotel bookend: ' + d.bookend);
     if(d.returnBy) L.push('- return by: ' + d.returnBy);
+    if(d.color) L.push('- color: ' + d.color);
     L.push('');
     d.order.forEach(id => {
       const s = trip.stops[id];
@@ -177,6 +194,7 @@ const KEY_ALIASES = {
   subtitle:'subtitle', days:'days',
   'start date':'startDate', date:'startDate', 'startdate':'startDate',
   theme:'theme',
+  color:'color', colour:'color', 'day color':'color', 'day colour':'color',
 };
 
 const INFO_KEYS = {
@@ -223,7 +241,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -367,6 +385,7 @@ export function parseTrip(text){
         else if(key === 'hotel') section.__hotelName = /^(none|no|-|)$/i.test(value) ? null : value;
         else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.bookend = value.toLowerCase();
         else if(key === 'returnBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) section.returnBy = v; }
+        else if(key === 'color' && DAY_COLORS[value.toLowerCase()]) section.color = value.toLowerCase();
       } else if(!section){
         // trip-level metadata
         if(key === 'subtitle') trip.subtitle = decVal(value);

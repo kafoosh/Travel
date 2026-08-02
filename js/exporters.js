@@ -17,6 +17,13 @@
 
 import { computeSchedule } from './schedule.js';
 import { formatTime } from './util.js';
+import { DAY_COLORS } from './format.js';
+
+/* KML colors are aabbggrr; b3 ≈ 70% opacity, matching the default route style. */
+function kmlColor(hex){
+  const h = hex.replace('#','');
+  return 'b3' + h.slice(4,6) + h.slice(2,4) + h.slice(0,2);
+}
 
 function xmlEsc(s){
   return String(s == null ? '' : s)
@@ -64,6 +71,8 @@ export function tripKml(trip){
   L.push('<name>' + xmlEsc(trip.name || 'Trip') + '</name>');
   if(trip.subtitle) L.push('<description>' + xmlEsc(trip.subtitle) + '</description>');
   L.push('<Style id="route"><LineStyle><color>b3336ec1</color><width>3</width></LineStyle></Style>');
+  Object.entries(DAY_COLORS).forEach(([key, c]) =>
+    L.push('<Style id="route-' + key + '"><LineStyle><color>' + kmlColor(c.accent) + '</color><width>3</width></LineStyle></Style>'));
 
   const placemark = (name, desc, lat, lng) =>
     '<Placemark><name>' + xmlEsc(name) + '</name>' +
@@ -85,7 +94,8 @@ export function tripKml(trip){
     });
     const pts = dayPoints(trip, day);
     if(pts.length > 1){
-      L.push('<Placemark><name>' + xmlEsc('Day ' + day.id + ' route') + '</name><styleUrl>#route</styleUrl>' +
+      L.push('<Placemark><name>' + xmlEsc('Day ' + day.id + ' route') + '</name><styleUrl>#route' +
+        (DAY_COLORS[day.color] ? '-' + day.color : '') + '</styleUrl>' +
         '<LineString><tessellate>1</tessellate><coordinates>' +
         pts.map(p => p[1] + ',' + p[0] + ',0').join(' ') +
         '</coordinates></LineString></Placemark>');

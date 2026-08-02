@@ -76,6 +76,32 @@
   --shadow: 0 2px 10px rgba(35,40,29,0.10);
 }
 
+/* =========================================================
+   PER-DAY COLOURS
+   A day can adopt a named colour (day.color, picked in Edit
+   day) so different cities/areas read apart at a glance. The
+   day's tab, panel, All Stops header and Day-maps card carry
+   data-day-color, which re-points the accent variables for
+   that subtree — every accent-driven rule (pins, timeline
+   numbers, hotel toggle, hovers, legend) follows without
+   knowing about it. Dark/tint shades derive from the accent
+   with color-mix so they sit right on every theme, midnight
+   included. Keys mirror DAY_COLORS in js/format.js.
+   ========================================================= */
+[data-day-color="rust"]{   --day-accent:#C1502E; }
+[data-day-color="gold"]{   --day-accent:#B8891F; }
+[data-day-color="olive"]{  --day-accent:#77813B; }
+[data-day-color="forest"]{ --day-accent:#3E6B4F; }
+[data-day-color="teal"]{   --day-accent:#2E6E71; }
+[data-day-color="sea"]{    --day-accent:#3D6486; }
+[data-day-color="plum"]{   --day-accent:#7C4A6B; }
+[data-day-color="wine"]{   --day-accent:#96393F; }
+[data-day-color]{
+  --accent: var(--day-accent);
+  --accent-dark: color-mix(in srgb, var(--day-accent) 72%, black);
+  --accent-tint: color-mix(in srgb, var(--day-accent) 20%, var(--paper-card));
+}
+
 *{box-sizing:border-box;}
 html{scroll-behavior:smooth;}
 
@@ -116,13 +142,14 @@ body{
 .wrap{max-width:1180px;margin:0 auto;padding:0 20px 60px;}
 
 /* ---------- Header ---------- */
+/* The dashed bottom edge lives on .toplinks now — the nav sits outside the
+   header so its mobile sticky/fixed positioning isn't caged by the hero. */
 header.hero{
-  padding:38px 20px 26px;
+  padding:38px 20px 4px;
   text-align:center;
   background:
     radial-gradient(circle at 18% 20%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 40%),
     radial-gradient(circle at 82% 30%, color-mix(in srgb, var(--gold) 12%, transparent), transparent 42%);
-  border-bottom:2px dashed var(--line);
 }
 .eyebrow{
   font-family:'IBM Plex Mono', monospace;
@@ -169,14 +196,40 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .hotel-chip .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--accent);}
 
-/* ---------- Top nav ---------- */
+/* ---------- Top nav ----------
+   Desktop: one centred row — the six view tabs, then a dashed divider and a
+   quieter icon-only actions cluster. Mobile (media block below) repositions
+   the same elements: .tl-views becomes a fixed bottom tab bar, .tl-actions
+   a slim sticky top bar, and .ovf view buttons fold into the More sheet. */
 .toplinks{
   display:flex;
   justify-content:center;
-  gap:8px;
+  align-items:center;
+  gap:8px 0;
   margin:22px 0 0;
+  padding:0 20px 24px;
+  border-bottom:2px dashed var(--line);
   flex-wrap:wrap;
 }
+.tl-views, .tl-actions{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:center;
+  align-items:center;
+}
+.tl-actions{
+  margin-left:14px;
+  padding-left:14px;
+  border-left:1px dashed var(--line);
+}
+/* Label/icon matrix: desktop shows full labels on view tabs and bare icons
+   on the action pills; mobile flips this (see the mobile block). */
+.toplinks .ico, .toplinks .lbl-s{ display:none; }
+#btn-search .ico, #btn-settings .ico, #undo-btn .ico{ display:inline; font-size:14px; line-height:1; }
+#btn-search .lbl, #btn-settings .lbl, #undo-btn .lbl{ display:none; }
+#btn-more{ display:none; }
+#more-sheet{ display:none; }
 .toplinks button{
   font-family:'IBM Plex Mono', monospace;
   font-size:12px;
@@ -251,6 +304,11 @@ h1.title:hover{color:var(--accent-dark);}
 /* the tab strip runs horizontally, so the drop marker sits on a side edge */
 .daytab.drop-before{box-shadow: inset 3px 0 0 var(--gold);}
 .daytab.drop-after{box-shadow: inset -3px 0 0 var(--gold);}
+/* A coloured day wears its band on the tab even when inactive; the active
+   fill follows automatically via the --accent override. */
+.daytab[data-day-color]{border-top:3px solid var(--accent); padding-top:7px;}
+.daytab[data-day-color].drop-before{box-shadow: inset 3px 0 0 var(--gold);}
+.daytab[data-day-color].drop-after{box-shadow: inset -3px 0 0 var(--gold);}
 
 /* ---------- Day panel ---------- */
 .daypanel{
@@ -591,6 +649,11 @@ h1.title:hover{color:var(--accent-dark);}
   border-bottom:1px dashed var(--line);
   margin-bottom:8px;
 }
+.all-day-head[data-day-color]{
+  border-left:4px solid var(--accent);
+  padding-left:10px;
+  color:var(--accent-dark);
+}
 .all-row .stop-illustration{width:40px; height:40px; font-size:17px;}
 .all-row{padding:8px 12px;}
 .all-row .stop-name{font-size:14.5px; margin-bottom:1px;}
@@ -647,6 +710,8 @@ h1.title:hover{color:var(--accent-dark);}
   line-height:1.6;
 }
 .ap-head b{color:var(--ink); font-size:13px;}
+.ap-day[data-day-color]{border-top:3px solid var(--accent);}
+.ap-day[data-day-color] .ap-head b{color:var(--accent-dark);}
 .ap-map{height:150px; background:var(--paper);}
 .ap-list{
   margin:0; padding:9px 11px 11px 28px;
@@ -723,6 +788,29 @@ h1.title:hover{color:var(--accent-dark);}
   color:var(--ink-soft);
   background:var(--paper-card);
 }
+/* ---------- Day colour picker (Edit day modal) ---------- */
+.day-color-row{display:flex; gap:8px; flex-wrap:wrap; margin:2px 0 4px;}
+.day-color-swatch{
+  display:flex; align-items:center; gap:7px;
+  background:var(--card);
+  border:2px solid var(--line);
+  border-radius:999px;
+  padding:7px 13px 7px 9px;
+  min-height:40px;
+  cursor:pointer;
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  color:var(--ink-soft);
+}
+.day-color-swatch .sw-dot{
+  width:16px; height:16px; border-radius:50%;
+  background:var(--sw, var(--accent));
+  flex:none;
+}
+/* "Theme" = no day colour: follows the theme accent, dashed to say "default" */
+.day-color-swatch.none .sw-dot{border:2px dashed var(--ink-soft); background:var(--accent);}
+.day-color-swatch.active{border-color:var(--ink); box-shadow:0 0 0 2px var(--gold); color:var(--ink);}
+
 .settings-tools{margin-top:22px; padding-top:14px; border-top:2px dashed var(--line); display:flex; flex-direction:column; gap:10px;}
 .modal-subhead{font-family:'Fraunces', serif; font-size:17px; margin:0 0 2px;}
 
@@ -772,28 +860,108 @@ h1.title:hover{color:var(--accent-dark);}
    TABLET & MOBILE
    ========================================================= */
 @media (max-width: 860px){
-  .wrap{ padding:0 14px 50px; }
+  /* Room for the fixed bottom tab bar (and the home indicator) under the page. */
+  .wrap{ padding:0 14px calc(84px + env(safe-area-inset-bottom)); }
 
+  /* --- Top action bar: slim, sticky, thumb-agnostic (rare-use controls) --- */
   .toplinks{
-    position:sticky; top:0; z-index:50;
+    position:sticky; top:0; z-index:60;
     background:var(--paper);
-    margin:0 -14px;
-    padding:10px 14px;
+    margin:0;
+    padding:6px max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
     border-bottom:1px solid var(--line);
-    overflow-x:auto;
-    justify-content:flex-start;
     flex-wrap:nowrap;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none;
+    gap:6px;
   }
-  .toplinks::-webkit-scrollbar{ display:none; }
-  .toplinks button{
-    flex:none;
-    min-height:40px;
-    padding:8px 14px;
+  .tl-actions{
+    display:flex; flex-wrap:nowrap; align-items:center; gap:6px;
+    width:100%;
+    margin-left:0; padding-left:0; border-left:none;
+  }
+  #btn-settings{ margin-right:auto; }
+  .toplinks button{ min-height:44px; padding:8px 13px; }
+  /* Sync chip: glyph only at 44px — the full text lives in its title and in
+     Trip Info. Colors keep coming from the existing #cloud-chip rules. */
+  #cloud-chip{ font-size:0; min-width:44px; padding:0 12px; }
+  #cloud-chip::before{ font-size:15px; }
+  #cloud-chip[data-state="ok"]::before{ content:'●'; }
+  #cloud-chip[data-state="connecting"]::before{ content:'◌'; }
+  #cloud-chip[data-state="note"]::before{ content:'↻'; }
+  #cloud-chip[data-state="error"]::before{ content:'⚠'; }
+
+  /* --- Bottom view bar: fixed, five thumb-size slots, icon over label --- */
+  .tl-views{
+    position:fixed; left:0; right:0; bottom:0; z-index:70;
+    display:flex; flex-wrap:nowrap; gap:2px;
+    background:var(--paper);
+    border-top:1px solid var(--line);
+    padding:4px max(8px, env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+  .tl-views button{
+    flex:1 1 0; min-width:0; min-height:52px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    border:none; border-radius:10px;
+    padding:6px 2px;
+    letter-spacing:0.04em;
+  }
+  .tl-views .ovf{ display:none; }
+  #btn-more{ display:flex; }
+  .tl-views .ico{ display:block; font-size:20px; line-height:1; }
+  .tl-views .lbl{ display:none; }
+  .tl-views .lbl-s{
+    display:block; font-size:10px;
+    max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  /* Bar order (DOM keeps desktop order for unchanged tab sequence there). */
+  #btn-view-days{ order:1; } #btn-view-all{ order:2; } #btn-search{ order:3; }
+  #btn-view-info{ order:4; } #btn-more{ order:5; }
+  .tl-views button.active{ background:var(--accent-tint); color:var(--accent-dark); }
+  /* "More" lights up while one of its sheet views is open. */
+  html[data-view="optional"] #btn-more,
+  html[data-view="bin"] #btn-more,
+  html[data-view="ai"] #btn-more{ background:var(--accent-tint); color:var(--accent-dark); }
+
+  /* --- More sheet --- */
+  #more-sheet:not([hidden]){ display:block; }
+  .sheet-backdrop{
+    position:fixed; inset:0; z-index:90;
+    background:rgba(15,15,15,0.45);
+  }
+  .sheet-panel{
+    position:fixed; left:0; right:0; z-index:95;
+    bottom:calc(61px + env(safe-area-inset-bottom));
+    background:var(--paper-card);
+    border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0;
+    box-shadow:0 -8px 30px rgba(0,0,0,0.18);
+    padding:10px 12px 12px;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .sheet-panel::before{
+    content:''; display:block; align-self:center;
+    width:38px; height:4px; border-radius:2px;
+    background:var(--line); margin-bottom:8px;
+  }
+  .sheet-panel button{
+    min-height:48px;
+    display:flex; align-items:center; gap:10px;
+    background:none; border:none; border-radius:10px;
+    padding:0 12px;
+    font-family:'Work Sans', sans-serif; font-size:15px;
+    color:var(--ink); text-align:left; cursor:pointer;
+  }
+  .sheet-panel button:active{ background:var(--accent-tint); }
+  html[data-view="optional"] #mnav-optional,
+  html[data-view="bin"] #mnav-bin,
+  html[data-view="ai"] #mnav-ai{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; }
+
+  /* iOS keyboard: an in-page (non-modal) input focus floats fixed bars over
+     the keyboard — hide the bottom bar for the duration. */
+  @supports selector(:has(*)){
+    body:has(.wrap input:focus, .wrap textarea:focus, .wrap select:focus) .tl-views{ display:none; }
   }
 
-  header.hero{ padding:18px 14px 14px; }
+  header.hero{ padding:18px 14px 4px; }
   h1.title{ margin:4px 0 4px; }
   .hero-sub{ font-size:13px; line-height:1.45; }
   .hero-hotels{ gap:6px; margin-top:14px; }
@@ -826,15 +994,22 @@ h1.title:hover{color:var(--accent-dark);}
   #add-location-btn{ flex:1 1 100%; }
 
   .hotel-toggle{ padding:10px 16px; }
-  .hotel-opt{ min-height:38px; }
+  .hotel-opt{ min-height:44px; }
 
   .schedule{ padding:12px 12px 18px; }
   .mappanel{ padding:12px 12px 18px; }
 
+  /* The Schedule/Map toggle stays reachable while scrolling a long day —
+     it sticks just under the top action bar. */
   .view-switch{
     display:flex;
     gap:6px;
     margin:10px 0 0;
+    position:sticky;
+    top:57px;   /* just under the 57px top action bar */
+    z-index:40;
+    background:var(--paper-card);
+    padding:8px 0;
   }
   .view-switch button{
     flex:1;
@@ -850,7 +1025,7 @@ h1.title:hover{color:var(--accent-dark);}
   .view-switch button.active{ background:var(--ink); color:var(--paper-card); border-color:var(--ink); }
   .daypanel-body.show-map .schedule{ display:none; }
   .daypanel-body.show-list .mappanel{ display:none; }
-  #map{ min-height:60vh; }
+  #map{ min-height:60vh; min-height:62dvh; }
 
   .stop-card{ padding:12px 10px; gap:10px; align-items:flex-start; }
   .stop-illustration{ width:46px; height:46px; font-size:19px; }
@@ -873,16 +1048,36 @@ h1.title:hover{color:var(--accent-dark);}
   .infogrid{ padding:16px 16px 22px; grid-template-columns:1fr; gap:12px; }
 
   .modal-overlay{ padding:0; align-items:flex-end; }
-  .modal-box{ max-height:92vh; border-radius:16px 16px 0 0; }
+  /* overscroll-behavior stops the sheet's scroll chaining into the page
+     (the iOS rubber-band behind an open sheet); dvh tracks the real
+     viewport under Safari's collapsing toolbars. */
+  .modal-overlay, .modal-box{ overscroll-behavior:contain; }
+  .modal-box{ max-height:92vh; max-height:92dvh; border-radius:16px 16px 0 0; }
   .modal-photo{ height:200px; border-radius:16px 16px 0 0; }
-  .modal-content{ padding:18px 18px 30px; }
+  .modal-content{ padding:18px 18px max(30px, calc(18px + env(safe-area-inset-bottom))); }
   .modal-title{ font-size:22px; }
-  .modal-close{ width:40px; height:40px; }
+  /* .modal-overlay prefix: the base .modal-close rule sits later in this
+     file, so a bare .modal-close here would lose the cascade tie. */
+  .modal-overlay .modal-close{ width:44px; height:44px; top:max(10px, env(safe-area-inset-top)); }
 
+  /* 16px text inputs avoid iOS zoom-on-focus — everywhere, not just the
+     add-location form. */
+  input[type="text"], input[type="number"], input[type="time"],
+  input[type="date"], textarea{ font-size:16px; }
   .add-location-form input,
   .add-location-form select,
-  .add-location-form textarea{ min-height:44px; font-size:16px; } /* 16px avoids iOS zoom-on-focus */
+  .add-location-form textarea{ min-height:44px; font-size:16px; }
   .add-location-form button[type="submit"]{ min-height:48px; font-size:14px; }
+
+  /* Dense secondary controls get real touch sizes. */
+  .mode-opt, .ut-menu button{ min-height:44px; font-size:13px; padding:8px 12px; }
+  .ut-chip{ min-height:40px; padding:8px 12px; font-size:13px; }
+  .travel-connector.pickable{ min-height:40px; }
+  .pref-chip{ min-height:40px; padding:8px 12px; }
+  .hotel-mini-row button{ min-height:40px; padding:6px 12px; font-size:12.5px; }
+  .group-controls{ gap:8px; }
+  .group-label{ font-size:13px; }
+  .group-label input[type="number"]{ min-height:44px; width:64px; }
 }
 
 @media (max-width: 560px){
@@ -1001,6 +1196,9 @@ h1.title:hover{color:var(--accent-dark);}
   border-radius:10px;
   border:1px solid var(--line);
   background:var(--paper);
+  /* Own stacking context: Leaflet's internal z-indexes (200–800) must never
+     paint over the sticky/fixed nav bars or the modals. */
+  isolation:isolate;
 }
 .map-legend{
   display:flex;
