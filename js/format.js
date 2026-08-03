@@ -12,6 +12,17 @@
 
 export const CATEGORIES = ['landmark','museum','church','park','view','food','shop','hike','hotel','flight','travel','boat','other'];
 
+/* The face of each category / travel mode. They live here, next to the
+   category list itself, because more than one renderer needs them: the site
+   (js/ui.js) and the self-contained offline export (js/offline.js), which
+   can't import anything from the running UI. */
+export const CAT_ICONS = {
+  landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
+  food:'🍝', view:'🌇', travel:'🚄', shop:'🛍️', hike:'🥾',
+  hotel:'🛏️', flight:'✈️', boat:'🚤', other:'📍'
+};
+export const MODE_ICONS = { walk:'🚶', cycle:'🚲', transit:'🚌', bus:'🚌', metro:'🚇', tram:'🚋', ferry:'⛴️', taxi:'🚕', boat:'🚤' };
+
 export const DEFAULT_DUR = {
   landmark:45, museum:90, church:30, park:45, view:30, food:60,
   shop:60, hike:150, hotel:20, flight:90, travel:120, boat:30, other:45

@@ -1644,15 +1644,19 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
 .gmaps-row:last-child{border-bottom:none;}
 .gmaps-row:hover{background:var(--accent-tint);}
 .gmaps-row input[type="checkbox"]{flex:none; width:16px; height:16px; accent-color:var(--accent);}
+/* Shows the stop's number in the itinerary, so it reads the same here as on
+   the day. min-width + padding keeps a hike's "4b" from being squeezed. */
 .gm-num{
   flex:none;
-  width:24px; height:24px;
+  min-width:24px; height:24px; padding:0 4px;
   display:flex; align-items:center; justify-content:center;
-  border-radius:50%;
+  border-radius:12px;
   background:var(--accent); color:#fff;
   font-family:'IBM Plex Mono', monospace;
   font-size:11.5px;
 }
+/* Hotel bookends carry no number in the itinerary either. */
+.gm-num-none{background:transparent; color:var(--ink-soft); border:1px dashed var(--line); font-size:12px;}
 .gmaps-row.off .gm-num{background:transparent; color:var(--ink-soft); border:1px dashed var(--line);}
 .gmaps-row.off .gm-name{color:var(--ink-soft); text-decoration:line-through;}
 .gm-main{display:flex; flex-direction:column; gap:1px; min-width:0; flex:1;}
@@ -1663,6 +1667,32 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
 .gmaps-row.over .gm-num{background:var(--ink-soft);}
 .gmaps-row.over .gm-name{color:var(--ink-soft);}
 #gmaps-note.warn{color:var(--danger);}
+
+/* =========================================================
+   OFFLINE EXPORT DIALOG
+   Three or four toggles and a status line that doubles as a
+   progress report while the photos are being fetched.
+   ========================================================= */
+.off-opts{display:flex; flex-direction:column; gap:2px; margin:14px 0 4px;}
+.off-opt{
+  display:flex; gap:10px; align-items:flex-start;
+  padding:10px; border-radius:10px; cursor:pointer;
+}
+.off-opt:hover{background:var(--accent-tint);}
+.off-opt input[type="checkbox"]{flex:none; width:18px; height:18px; margin-top:2px; accent-color:var(--accent);}
+.off-opt input:disabled{opacity:.4;}
+.off-opt > span{display:flex; flex-direction:column; gap:2px; font-size:14.5px;}
+.off-opt .al-hint{margin:0;}
+.off-status{
+  margin:8px 2px 0;
+  font-family:'IBM Plex Mono', monospace; font-size:12px;
+  color:var(--ink-soft);
+  overflow-wrap:anywhere;
+}
+@media (max-width: 720px){
+  .off-opt{padding:12px 10px;}
+  .off-opt input[type="checkbox"]{width:22px; height:22px;}
+}
 
 /* =========================================================
    MOBILE LAST-WORD OVERRIDES + PRINT
@@ -1714,7 +1744,7 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .gmaps-count{ margin-left:0; flex:1 0 100%; font-size:12.5px; }
   .gmaps-row{ min-height:52px; padding:10px; gap:12px; }
   .gmaps-row input[type="checkbox"]{ width:22px; height:22px; }
-  .gm-num{ width:26px; height:26px; font-size:12px; }
+  .gm-num{ min-width:26px; height:26px; font-size:12px; border-radius:13px; }
   .gm-name{ font-size:15px; }
   .gmaps-list{ max-height:none; }
   #gmaps-overlay .modal-actions{ margin-top:12px; }

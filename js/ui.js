@@ -7,7 +7,8 @@
    ========================================================= */
 
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
-import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, newDay, serializeTrip, importText, blankTrip } from './format.js';
+import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
+         newDay, serializeTrip, importText, blankTrip } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
 import { computeSchedule, getHotel } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
@@ -16,20 +17,15 @@ import { cloud, cloudStatusText, createRoom, duplicateRoom, deleteRoom, leaveRoo
 import { buildPrompt, PROMPT_PREFS } from './llm.js';
 import { attachAutocomplete } from './geocode.js';
 import { dayMapPoints, googleMapsUrl, tripKml } from './exporters.js';
+import { buildOfflineHtml, collectPhotos, photoUrls, offlineFileName } from './offline.js';
 import { mountImage } from './img.js';
 
-const ICONS = {
-  landmark:'🏛️', museum:'🖼️', church:'⛪', park:'🌳',
-  food:'🍝', view:'🌇', travel:'🚄', shop:'🛍️', hike:'🥾',
-  hotel:'🛏️', flight:'✈️', boat:'🚤', other:'📍'
-};
 const CAT_LABEL = {
   landmark:'Landmark', museum:'Museum', church:'Church / temple', park:'Park / nature',
   view:'Viewpoint', food:'Food & drink', shop:'Shopping', hike:'Hike (A → B)',
   hotel:'Hotel / check-in', flight:'Flight', travel:'Train / travel leg',
   boat:'Boat / ferry', other:'Other'
 };
-const MODE_ICON = { walk:'🚶', cycle:'🚲', transit:'🚌', bus:'🚌', metro:'🚇', tram:'🚋', ferry:'⛴️', taxi:'🚕', boat:'🚤' };
 const MODE_LABEL = { walk:'walk', cycle:'cycle', transit:'transit', bus:'bus', metro:'metro', tram:'tram', ferry:'ferry', taxi:'taxi', boat:'boat' };
 // Choosable per-leg overrides (submodes like bus/metro come from the router, not the picker)
 const PICKABLE_MODES = [[null,'Auto'],['walk','🚶 Walk'],['cycle','🚲 Cycle'],['transit','🚌 Transit'],['taxi','🚕 Taxi'],['boat','🚤 Boat']];
@@ -1425,7 +1421,7 @@ function openGmapsPicker(day){
   list.innerHTML = gmapsPts.map(p => `
     <label class="gmaps-row">
       <input type="checkbox" checked>
-      <span class="gm-num"></span>
+      <span class="gm-num${p.num == null ? ' gm-num-none' : ''}"${p.num == null ? ' title="A hotel bookend — the day doesn&#39;t number it"' : ''}>${p.num == null ? '–' : esc(p.num)}</span>
       <span class="gm-icon" aria-hidden="true">${ICONS[p.cat] || '📍'}</span>
       <span class="gm-main">
         <span class="gm-name">${esc(p.label)}</span>
@@ -1448,8 +1444,10 @@ function setAllGmapsPicks(on){
   refreshGmapsPicker();
 }
 
-/* Numbers follow the ticks, so the list always reads as the route Google
-   will get — and anything past the cap is shown as dropped, not silently. */
+/* The numbers are the itinerary's own — stop 4 stays "4" however the ticks
+   fall, so a route between two stops is picked by the numbers you see on the
+   day. Only the styling follows the selection: unticked rows grey out, and
+   ticked ones past Google's cap are shown as dropped, not silently lost. */
 function refreshGmapsPicker(){
   let n = 0;
   $('gmaps-list').querySelectorAll('.gmaps-row').forEach((row, i) => {
@@ -1457,7 +1455,6 @@ function refreshGmapsPicker(){
     if(on) n += 1;
     row.classList.toggle('off', !on);
     row.classList.toggle('over', on && n > GMAPS_MAX);
-    row.querySelector('.gm-num').textContent = on ? String(n) : '–';
   });
   $('gmaps-count').textContent = n + ' of ' + gmapsPts.length + ' selected';
   const note = $('gmaps-note');
@@ -1466,8 +1463,8 @@ function refreshGmapsPicker(){
     note.textContent = 'Pick at least two — a start and a destination.';
     note.classList.remove('warn');
   } else if(n > GMAPS_MAX){
-    note.textContent = 'Google Maps links carry at most ' + GMAPS_MAX + ' points — the greyed ones after number ' +
-      GMAPS_MAX + ' will be left out.';
+    note.textContent = 'Google Maps links carry at most ' + GMAPS_MAX + ' points — the greyed-out ticks past the ' +
+      GMAPS_MAX + 'th will be left out.';
     note.classList.add('warn');
   } else {
     note.textContent = 'Opens as a walking route through these ' + n + ' points, in this order.';
@@ -2154,9 +2151,10 @@ export function renderAiPlan(){
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Import &amp; export</h3>
-      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output. The KML export makes a shareable Google map: go to <a href="https://mymaps.google.com" target="_blank" rel="noopener">mymaps.google.com</a> → Create a new map → Import → pick the .kml — every day becomes a toggleable layer with pins and the route.</p>
+      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. <b>Offline copy</b> builds a single HTML file of the finished itinerary — days, times, notes, photos and a route sketch each day — that opens on a phone with no signal at all. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output. The KML export makes a shareable Google map: go to <a href="https://mymaps.google.com" target="_blank" rel="noopener">mymaps.google.com</a> → Create a new map → Import → pick the .kml — every day becomes a toggleable layer with pins and the route.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="export-btn">⬇ Export trip (.md)</button>
+        <button class="reset-btn" id="export-offline-btn" title="One self-contained HTML file with the whole itinerary — opens on a phone with no signal at all">📴 Offline copy (.html)</button>
         <button class="reset-btn" id="export-kml-btn" title="One folder per day with pins and route lines — import at mymaps.google.com for a shareable Google map">⬇ Export KML (Google My Maps)</button>
         <button class="reset-btn" id="import-file-btn">⬆ Import file (.md / .txt / .csv)</button>
         <input type="file" id="import-file" accept=".md,.txt,.csv,text/plain,text/markdown,text/csv" class="hidden">
@@ -2198,6 +2196,7 @@ export function renderAiPlan(){
 
   // import / export
   $('export-btn').addEventListener('click', exportTrip);
+  $('export-offline-btn').addEventListener('click', openOfflineExport);
   $('export-kml-btn').addEventListener('click', () => {
     const blob = new Blob([tripKml(trip())], { type: 'application/vnd.google-earth.kml+xml' });
     const a = document.createElement('a');
@@ -2315,6 +2314,92 @@ function exportTrip(){
   a.download = slugify(trip().name) + '.md';
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* =========================================================
+   OFFLINE EXPORT
+
+   The .md export is the trip's source; this is the trip as a
+   thing you carry. One HTML file, no requests of any kind, so
+   the itinerary survives a flight, a tunnel, or roaming
+   switched off — see js/offline.js for what goes in it.
+   ========================================================= */
+let offlineBuilding = false;
+
+function openOfflineExport(){
+  const t = trip();
+  const hasOptional = (t.optional || []).length > 0;
+  $('off-optional-row').classList.toggle('hidden', !hasOptional);
+  $('off-link-row').classList.toggle('hidden', !cloud.room);
+
+  const n = photoUrls(t, { optional: hasOptional }).length;
+  const photoBox = $('off-photos');
+  photoBox.disabled = n === 0;
+  if(n === 0) photoBox.checked = false;
+  $('off-status').textContent = n
+    ? n + (n === 1 ? ' photo' : ' photos') + ' to pack — that part needs the connection you have right now.'
+    : 'This trip has no photos to pack.';
+
+  $('offline-overlay').classList.add('open');
+  lastFocusedEl = document.activeElement;
+  $('offline-close').focus();
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOfflineExport(){
+  if(offlineBuilding) return;        // a half-fetched build has nowhere to go
+  $('offline-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  if(lastFocusedEl && lastFocusedEl.focus) lastFocusedEl.focus();
+}
+
+function fileSize(bytes){
+  return bytes >= 1024 * 1024 ? (bytes / (1024 * 1024)).toFixed(1) + ' MB' : Math.max(1, Math.round(bytes / 1024)) + ' KB';
+}
+
+async function buildOffline(){
+  if(offlineBuilding) return;
+  const t = trip();
+  const btn = $('off-build');
+  const status = $('off-status');
+  const optional = !$('off-optional-row').classList.contains('hidden') && $('off-optional').checked;
+  const wantPhotos = $('off-photos').checked && !$('off-photos').disabled;
+
+  offlineBuilding = true;
+  btn.disabled = true;
+  btn.textContent = '◌ Building…';
+  try{
+    let photos = null, report = null;
+    if(wantPhotos){
+      report = await collectPhotos(t, {
+        optional,
+        onProgress: (p) => { status.textContent = 'Packing photos… ' + p.done + ' of ' + p.total; },
+      });
+      photos = report.photos;
+    }
+    status.textContent = 'Writing the file…';
+    const html = buildOfflineHtml(t, {
+      photos,
+      optional,
+      maps: $('off-maps').checked,
+      planUrl: (cloud.room && $('off-link').checked) ? shareUrl(cloud.room) : null,
+    });
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = offlineFileName(t);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    status.textContent = '✓ ' + a.download + ' · ' + fileSize(blob.size) +
+      (report ? ' · ' + report.ok + ' of ' + report.total + ' photos packed' +
+        (report.failed ? ' (' + report.failed + ' refused — those stops keep their icon)' : '') : '');
+  } catch(e){
+    status.textContent = '✕ ' + (e.message || 'The file could not be built.');
+  } finally {
+    offlineBuilding = false;
+    btn.disabled = false;
+    btn.textContent = '⬇ Build the offline copy';
+  }
 }
 
 /* Held in a variable, not just in the DOM: a successful import switches to
@@ -2647,6 +2732,11 @@ export function wireStaticHandlers(){
   on('gmaps-none', 'click', () => setAllGmapsPicks(false));
   on('gmaps-open', 'click', openGmapsRoute);
 
+  // offline export
+  on('offline-close', 'click', closeOfflineExport);
+  on('offline-overlay', 'click', (e) => { if(e.target.id === 'offline-overlay') closeOfflineExport(); });
+  on('off-build', 'click', buildOffline);
+
   // search
   on('btn-search', 'click', openSearch);
   on('search-close', 'click', closeSearch);
@@ -2731,12 +2821,13 @@ export function wireStaticHandlers(){
   // escape closes whichever overlay is open
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape') return;
-    for(const id of ['search-overlay','gmaps-overlay','auto-plan-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
+    for(const id of ['search-overlay','gmaps-overlay','offline-overlay','auto-plan-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
       const ov = $(id);
       if(ov && ov.classList.contains('open')){
         if(id === 'modal-overlay') closeModal();
         else if(id === 'search-overlay') closeSearch();
         else if(id === 'gmaps-overlay') closeGmapsPicker();
+        else if(id === 'offline-overlay') closeOfflineExport();
         else if(id === 'auto-plan-overlay') closeAutoPlan();
         else { ov.classList.remove('open'); document.body.style.overflow = ''; }
         return;
