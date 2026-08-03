@@ -281,6 +281,40 @@
   </div>
 </div>
 
+<!-- Offline export modal: build the take-it-with-you HTML file -->
+<div class="modal-overlay" id="offline-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="offline-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title">Take this trip offline</h3>
+      <p class="ap-sub">One HTML file holding the whole itinerary — every day, time, travel leg, note, photo and
+        coordinate, plus a route sketch per day. It loads nothing from the internet, so it opens on a phone in a
+        plane, a tunnel, or a country where the data is switched off.</p>
+      <div class="off-opts" id="off-opts">
+        <label class="off-opt"><input type="checkbox" id="off-photos" checked>
+          <span><b>Include photos</b><span class="al-hint">Downloaded and packed into the file, shrunk to phone
+            size. Makes it much bigger, and needs a connection right now. Without this, photos only show when
+            you have signal.</span></span></label>
+        <label class="off-opt"><input type="checkbox" id="off-maps" checked>
+          <span><b>Include route sketches</b><span class="al-hint">A small tile-free map per day — your routes and
+            numbered stops, drawn from the plan itself.</span></span></label>
+        <label class="off-opt" id="off-optional-row"><input type="checkbox" id="off-optional" checked>
+          <span><b>Include unassigned stops</b><span class="al-hint">The ideas with no day of their own.</span></span></label>
+        <label class="off-opt hidden" id="off-link-row"><input type="checkbox" id="off-link" checked>
+          <span><b>Link back to the live plan</b><span class="al-hint">Adds this trip's share link to the file's
+            footer. Anyone you send the file to can then edit the live trip.</span></span></label>
+      </div>
+      <p class="off-status" id="off-status"></p>
+      <div class="modal-actions">
+        <button class="reset-btn" id="off-build">⬇ Build the offline copy</button>
+      </div>
+      <p class="al-hint">Keep it on the phone: iPhone → open once in Safari, then Share → Add to Home Screen (or
+        leave it in Files). Android → keep it in Downloads and open with Chrome. It can be messaged or airdropped
+        to whoever is travelling with you — it needs nothing else to work.</p>
+    </div>
+  </div>
+</div>
+
 <!-- Search modal -->
 <div class="modal-overlay" id="search-overlay">
   <div class="modal-box search-box">

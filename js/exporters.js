@@ -37,24 +37,30 @@ function xmlEsc(s){
 }
 
 /* Ordered points for a day: hotel bookends + stops + hike ends. Each is
-   {lat, lng, label, cat, when} — `when` is the scheduled time for stops and
-   a plain word for the bookends, so a picker can name what it is offering. */
+   {lat, lng, label, cat, when, num} — `when` is the scheduled time for stops
+   and a plain word for the bookends, so a picker can name what it is offering.
+   `num` is the point's number in the itinerary itself (matching the numbered
+   pins on the day map): a running count over located stops, `Nb` for a hike's
+   end point, null for the hotel bookends, which the day never numbers. It is
+   a property of the plan, not of any selection made from it. */
 export function dayMapPoints(trip, day){
   const sched = computeSchedule(trip, day);
   const pts = [];
   const hotel = sched.hotel;
   const bookend = day.bookend || 'both';
   if(hotel && hotel.lat != null && bookend !== 'end')
-    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'Start of the day' });
+    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'Start of the day', num: null });
+  let n = 0;
   sched.rows.forEach(r => {
     const s = r.stop;
     if(s.lat == null) return;
-    pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start) });
+    n += 1;
+    pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start), num: String(n) });
     if(s.cat === 'hike' && s.endLat != null)
-      pts.push({ lat: s.endLat, lng: s.endLng, label: s.name + ' (hike end)', cat: 'hike', when: '' });
+      pts.push({ lat: s.endLat, lng: s.endLng, label: s.name + ' (hike end)', cat: 'hike', when: '', num: n + 'b' });
   });
   if(hotel && hotel.lat != null && bookend !== 'start' && pts.length)
-    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'End of the day' });
+    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'End of the day', num: null });
   return pts;
 }
 

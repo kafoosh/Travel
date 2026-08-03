@@ -192,7 +192,68 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     check('kml has a folder per day + optional', (kml.match(/<Folder>/g) || []).length === 11);
     check('kml placemark count covers stops + routes', placemarks >= 68 + 10, String(placemarks));
     check('kml escapes reserved characters', !/&(?!amp;|lt;|gt;|quot;|apos;)/.test(kml));
-    console.log(failures ? '\n' + failures + ' FAILURE(S)' : '\nall checks passed');
-    process.exit(failures ? 1 : 0);
+
+    // Point numbers belong to the itinerary, not to whatever is ticked in the
+    // picker: stops count 1..n, a hike's end is "Nb", hotel bookends aren't
+    // numbered at all.
+    const numbered = dayMapPoints(t, t.days[1]);
+    check('map points carry the itinerary\'s own numbers',
+      numbered.filter(p => p.cat !== 'hotel').map(p => p.num).join(',') === '1,2,3,4,5,6,7',
+      numbered.map(p => p.num).join(','));
+    check('hotel bookends are unnumbered', numbered.filter(p => p.num == null).length === 2);
+    check('numbering ignores any selection', (() => {
+      const picked = [numbered[4], numbered[5]];   // "just these two" case
+      return picked[0].num === '4' && picked[1].num === '5';
+    })());
+
+    /* --- 6. offline export --- */
+    import('../js/offline.js').then(({ buildOfflineHtml, offlineFileName, photoUrls }) => {
+      console.log('offline export:');
+      const ot = parseTrip(md).trip;
+      // A stop whose text is actively hostile: it must survive as text.
+      const evil = Object.values(ot.stops)[0];
+      evil.notes = '</textarea><script>alert(1)</script>"><img src=x onerror=alert(2)>';
+      evil.name = 'Tricky "quoted" <b>stop</b>';
+      const html = buildOfflineHtml(ot, { generatedAt: new Date('2026-01-01') });
+
+      check('one self-contained document', html.startsWith('<!DOCTYPE html>') && html.trim().endsWith('</html>'));
+      check('a view per day, plus unassigned and info', (html.match(/class="view"/g) || []).length === 12,
+        String((html.match(/class="view"/g) || []).length));
+      check('every located day gets a route sketch', (html.match(/<svg class="map"/g) || []).length === 10);
+      check('every stop is on the page', (html.match(/class="stop"/g) || []).length === 68 + 11,
+        String((html.match(/class="stop"/g) || []).length));
+      check('exactly one script block', (html.match(/<script/g) || []).length === 1 && (html.match(/<\/script>/g) || []).length === 1);
+      check('nothing is fetched at runtime', !/\b(fetch|XMLHttpRequest|importScripts)\s*\(/.test(html)
+        && !/<link[^>]+href="http/.test(html) && !/<script[^>]+src=/.test(html));
+      // Hostile text may appear as text (escaped); what it must never do is
+      // close an attribute or open a tag of its own.
+      check('hostile stop text cannot break out', !html.includes('<script>alert(1)') && !html.includes('<img src=x')
+        && !html.includes('</textarea><script>') && !html.includes('<b>stop</b>'));
+      check('file name is derived from the trip', offlineFileName(ot) === 'rome-venice-offline.html');
+      check('photos are only counted once', photoUrls(ot).length === new Set(photoUrls(ot)).size);
+
+      // The trip file travels inside the page, so a phone can hand the plan
+      // back to the planner (or to another device) with nothing but the file.
+      const raw = html.split('<textarea id="trip-src" readonly aria-hidden="true">')[1].split('</textarea>')[0];
+      const unesc = raw.replaceAll('&lt;','<').replaceAll('&gt;','>').replaceAll('&quot;','"')
+        .replaceAll('&#39;',"'").replaceAll('&amp;','&');
+      const back = parseTrip(unesc).trip;
+      check('the embedded trip file re-imports whole',
+        back.days.length === 10 && Object.keys(back.stops).length === 79 && back.hotels.length === 3);
+      check('embedded trip survives the hostile text', (() => {
+        const s = Object.values(back.stops).find(x => x.name === evil.name);
+        return !!s && s.notes === evil.notes;
+      })());
+
+      // Pins and route lines have to land inside the box that is drawn.
+      const svg = html.split('<svg class="map"')[1].split('</svg>')[0];
+      const h = Number(/viewBox="0 0 720 (\d+)"/.exec(html)[1]);
+      const coords = [...svg.matchAll(/c[xy]="(-?[\d.]+)"/g)].map(m => Number(m[1]));
+      check('map geometry stays inside the viewBox', coords.every(c => c >= -1 && c <= Math.max(720, h)),
+        'height ' + h);
+
+      console.log(failures ? '\n' + failures + ' FAILURE(S)' : '\nall checks passed');
+      process.exit(failures ? 1 : 0);
+    });
   });
 });
