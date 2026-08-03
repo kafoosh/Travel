@@ -15,7 +15,7 @@ import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, duplicateRoom, deleteRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt, PROMPT_PREFS } from './llm.js';
 import { attachAutocomplete } from './geocode.js';
-import { googleMapsDayUrl, tripKml } from './exporters.js';
+import { dayMapPoints, googleMapsUrl, tripKml } from './exporters.js';
 import { mountImage } from './img.js';
 
 const ICONS = {
@@ -297,12 +297,7 @@ function renderDayPanel(){
   `;
 
   $('edit-day-btn').addEventListener('click', () => openDayEdit(state.currentDayIndex));
-  $('gmaps-day-btn').addEventListener('click', () => {
-    const { url, truncated } = googleMapsDayUrl(trip(), day);
-    if(!url){ alert('This day needs at least two located stops for a Google Maps route.'); return; }
-    if(truncated) alert('Google Maps direction links cap at 11 points — opening the first 11 stops of this day.');
-    window.open(url, '_blank', 'noopener');
-  });
+  $('gmaps-day-btn').addEventListener('click', () => openGmapsPicker(day));
   $('add-location-btn').addEventListener('click', () => openLocationForm(null, day.id));
   $('optimize-order').addEventListener('click', () => {
     pushUndo();
@@ -1402,6 +1397,96 @@ function renderBin(){
       el.appendChild(row);
     });
   }
+}
+
+/* =========================================================
+   GOOGLE MAPS ROUTE PICKER
+
+   A day is often more points than Google's 11-point directions
+   cap, and usually you only want to navigate part of it — so the
+   button opens the day's located points by name (hotel bookends,
+   stops, hike ends) and hands Google only the ticked ones, in day
+   order. Everything is ticked on open, with select all / none for
+   the common "just these two" case.
+   ========================================================= */
+const GMAPS_MAX = 11;      // origin + 9 waypoints + destination
+let gmapsPts = [];         // the day's points, in visit order
+let gmapsPicked = [];      // parallel ticks
+
+function openGmapsPicker(day){
+  gmapsPts = dayMapPoints(trip(), day);
+  if(gmapsPts.length < 2){
+    alert('This day needs at least two located stops for a Google Maps route.');
+    return;
+  }
+  gmapsPicked = gmapsPts.map(() => true);
+  $('gmaps-heading').textContent = 'Google Maps — Day ' + day.id;
+  const list = $('gmaps-list');
+  list.innerHTML = gmapsPts.map(p => `
+    <label class="gmaps-row">
+      <input type="checkbox" checked>
+      <span class="gm-num"></span>
+      <span class="gm-icon" aria-hidden="true">${ICONS[p.cat] || '📍'}</span>
+      <span class="gm-main">
+        <span class="gm-name">${esc(p.label)}</span>
+        ${p.when ? `<span class="gm-when">${esc(p.when)}</span>` : ''}
+      </span>
+    </label>`).join('');
+  list.querySelectorAll('input[type="checkbox"]').forEach((box, i) => {
+    box.addEventListener('change', () => { gmapsPicked[i] = box.checked; refreshGmapsPicker(); });
+  });
+  refreshGmapsPicker();
+  $('gmaps-overlay').classList.add('open');
+  lastFocusedEl = document.activeElement;
+  $('gmaps-close').focus();
+  document.body.style.overflow = 'hidden';
+}
+
+function setAllGmapsPicks(on){
+  gmapsPicked = gmapsPicked.map(() => on);
+  $('gmaps-list').querySelectorAll('input[type="checkbox"]').forEach(box => { box.checked = on; });
+  refreshGmapsPicker();
+}
+
+/* Numbers follow the ticks, so the list always reads as the route Google
+   will get — and anything past the cap is shown as dropped, not silently. */
+function refreshGmapsPicker(){
+  let n = 0;
+  $('gmaps-list').querySelectorAll('.gmaps-row').forEach((row, i) => {
+    const on = gmapsPicked[i];
+    if(on) n += 1;
+    row.classList.toggle('off', !on);
+    row.classList.toggle('over', on && n > GMAPS_MAX);
+    row.querySelector('.gm-num').textContent = on ? String(n) : '–';
+  });
+  $('gmaps-count').textContent = n + ' of ' + gmapsPts.length + ' selected';
+  const note = $('gmaps-note');
+  const openBtn = $('gmaps-open');
+  if(n < 2){
+    note.textContent = 'Pick at least two — a start and a destination.';
+    note.classList.remove('warn');
+  } else if(n > GMAPS_MAX){
+    note.textContent = 'Google Maps links carry at most ' + GMAPS_MAX + ' points — the greyed ones after number ' +
+      GMAPS_MAX + ' will be left out.';
+    note.classList.add('warn');
+  } else {
+    note.textContent = 'Opens as a walking route through these ' + n + ' points, in this order.';
+    note.classList.remove('warn');
+  }
+  openBtn.disabled = n < 2;
+}
+
+function openGmapsRoute(){
+  const { url } = googleMapsUrl(gmapsPts.filter((p, i) => gmapsPicked[i]));
+  if(!url) return;
+  closeGmapsPicker();
+  window.open(url, '_blank', 'noopener');
+}
+
+function closeGmapsPicker(){
+  $('gmaps-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  if(lastFocusedEl && lastFocusedEl.focus) lastFocusedEl.focus();
 }
 
 /* =========================================================
@@ -2555,6 +2640,13 @@ export function wireStaticHandlers(){
   on('add-optional-btn', 'click', () => openLocationForm(null, 'optional'));
   on('all-add-btn', 'click', () => openLocationForm(null, currentDay().id));
 
+  // google maps route picker
+  on('gmaps-close', 'click', closeGmapsPicker);
+  on('gmaps-overlay', 'click', (e) => { if(e.target.id === 'gmaps-overlay') closeGmapsPicker(); });
+  on('gmaps-all', 'click', () => setAllGmapsPicks(true));
+  on('gmaps-none', 'click', () => setAllGmapsPicks(false));
+  on('gmaps-open', 'click', openGmapsRoute);
+
   // search
   on('btn-search', 'click', openSearch);
   on('search-close', 'click', closeSearch);
@@ -2639,11 +2731,12 @@ export function wireStaticHandlers(){
   // escape closes whichever overlay is open
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape') return;
-    for(const id of ['search-overlay','auto-plan-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
+    for(const id of ['search-overlay','gmaps-overlay','auto-plan-overlay','add-location-overlay','day-edit-overlay','hotel-edit-overlay','settings-overlay','modal-overlay']){
       const ov = $(id);
       if(ov && ov.classList.contains('open')){
         if(id === 'modal-overlay') closeModal();
         else if(id === 'search-overlay') closeSearch();
+        else if(id === 'gmaps-overlay') closeGmapsPicker();
         else if(id === 'auto-plan-overlay') closeAutoPlan();
         else { ov.classList.remove('open'); document.body.style.overflow = ''; }
         return;
