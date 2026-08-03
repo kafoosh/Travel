@@ -532,6 +532,41 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .bin-btn:hover{background:#f4d9d9; border-color:#c0645f;}
 
+/* =========================================================
+   DONE TICKS
+   A stop ticked off on the trip keeps its place, its time and
+   its number — it just steps back: the card fades and the
+   name is struck through, so what's left to do reads first.
+   The button sits next to the bin, filled once it's on.
+   ========================================================= */
+.done-btn{
+  font-size:12px;
+  line-height:1;
+  padding:5px 8px;
+  border-radius:6px;
+  border:1px solid var(--line);
+  background:var(--card);
+  color:var(--ink-soft);
+  cursor:pointer;
+}
+.done-btn:hover{background:var(--accent-tint); border-color:var(--accent);}
+.done-btn[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff;}
+.stop-card.done, .bin-row.done{opacity:.62;}
+.stop-card.done .stop-name, .bin-row.done .stop-name{text-decoration:line-through;}
+.stop-card.done .stop-number{background:var(--ink-soft);}
+/* The tick itself must stay legible — it's the way back out. */
+.stop-card.done .done-btn, .bin-row.done .done-btn{opacity:1;}
+.day-progress{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  padding:4px 10px;
+  border-radius:999px;
+  border:1px solid var(--accent);
+  color:var(--accent-dark);
+  background:var(--accent-tint);
+}
+#modal-done.on{background:var(--accent); border-color:var(--accent); color:#fff;}
+
 .bin-list{padding:16px 22px 26px;}
 .bin-row{
   display:flex; gap:12px; align-items:center;
@@ -802,6 +837,8 @@ h1.title:hover{color:var(--accent-dark);}
 .sr-icon{flex:none; font-size:18px;}
 .sr-main{display:flex; flex-direction:column; gap:1px; min-width:0;}
 .sr-name{font-size:14.5px; color:var(--ink); font-family:'Work Sans', sans-serif; overflow-wrap:anywhere;}
+.search-row.done .sr-name{text-decoration:line-through; color:var(--ink-soft);}
+.search-row.done .sr-icon{color:var(--accent);}
 .sr-where{
   font-family:'IBM Plex Mono', monospace;
   font-size:11px;
@@ -1113,8 +1150,12 @@ h1.title:hover{color:var(--accent-dark);}
   .stop-number{ width:26px; height:26px; font-size:12.5px; }
 
   .manage-row{ flex-wrap:wrap; gap:8px; width:100%; }
-  .move-to-day{ flex:1 1 120px; min-width:0; max-width:100%; min-height:40px; font-size:12px; }
+  /* A phone card's inner column is ~190px: "Move to…" plus two 44px touch
+     targets can't share a line without squeezing the select to a stub. So
+     the select takes its own line and ✓ / 🗑 sit together under it. */
+  .move-to-day{ flex:1 1 100%; min-width:0; max-width:100%; min-height:40px; font-size:12px; }
   .bin-btn{ min-height:40px; min-width:44px; font-size:15px; flex:0 0 auto; }
+  .done-btn{ min-height:40px; min-width:44px; font-size:15px; flex:0 0 auto; }
 
   .bin-list{ padding:12px 12px 20px; }
   .bin-row{ align-items:flex-start; }
@@ -1294,6 +1335,8 @@ h1.title:hover{color:var(--accent-dark);}
   background:var(--accent);
 }
 .map-pin span{transform:rotate(45deg);}
+/* Ticked off: still on the map, still numbered, just no longer shouting. */
+.map-pin.done-pin{background:var(--ink-soft); opacity:.7;}
 
 /* ---------- Info tab ---------- */
 /* Trip Info is prose. The old 260px auto-fit grid made 4 narrow columns —

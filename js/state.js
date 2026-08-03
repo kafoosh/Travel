@@ -84,6 +84,7 @@ export function normalizeTrip(t){
   Object.values(trip.stops).forEach(s => {
     if(!Array.isArray(s.tags)) s.tags = [];
     if(s.notes == null) s.notes = '';
+    s.done = !!s.done;
     if(!['walk','cycle','transit','taxi','boat'].includes(s.arriveBy)) s.arriveBy = null;
   });
   return trip;

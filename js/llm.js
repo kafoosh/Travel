@@ -117,7 +117,7 @@ RULES
 =====
 - Output ONE complete document in EXACTLY the same format as the current plan below — the ENTIRE updated trip, not a diff, not just the changed days.
 - Put the whole document inside a single fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste — they are load-bearing. Write nothing after the block. (If I ask for a file, save the same content as .md or .txt.)
-- Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line.
+- Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line, and a "- done: yes" line is a stop I have already visited — keep it, and don't rearrange or drop those stops unless I ask.
 - Keep every day's "- color:" line exactly as it is unless I ask to change it (valid values: rust, gold, olive, forest, teal, sea, plum, wine — it colour-codes that day in the planner).
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.

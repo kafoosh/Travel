@@ -263,8 +263,11 @@ function stopCardHtml(stop, opts){
   const { photos, num, time, dayLabel, extra } = opts;
   const tags = (stop.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
   const id = 'stop-' + esc(String(stop.id));
+  // Stops already ticked off in the planner start ticked here; the page then
+  // keeps its own ticks on top, for the days walked after the file was made.
+  const done = !!stop.done;
   return `
-  <article class="stop" id="${id}" data-search="${esc(searchText(stop, dayLabel))}">
+  <article class="stop${done ? ' done' : ''}" id="${id}" data-search="${esc(searchText(stop, dayLabel))}">
     <div class="stop-head">
       <span class="num${num == null ? ' nonum' : ''}">${num == null ? '·' : esc(String(num))}</span>
       ${photoHtml(stop.img, stop.cat, stop.name, photos)}
@@ -273,7 +276,7 @@ function stopCardHtml(stop, opts){
         <h3>${esc(stop.name)}</h3>
         ${extra || ''}
       </div>
-      <button class="tick" type="button" data-tick="${id}" aria-pressed="false" title="Mark as done">✓</button>
+      <button class="tick" type="button" data-tick="${id}" aria-pressed="${done}" title="Mark as done">✓</button>
     </div>
     ${stop.desc ? `<p class="desc">${esc(stop.desc)}</p>` : ''}
     ${stop.detail ? `<details class="more"><summary>More about this</summary><p>${esc(stop.detail)}</p></details>` : ''}
@@ -295,6 +298,8 @@ function dayHtml(trip, day, idx, opts){
     'starts ' + formatTime(parseTime(day.start)),
     sched.rows.length + (sched.rows.length === 1 ? ' stop' : ' stops'),
     visitMin ? formatDur(visitMin) + ' of visits' : null,
+    sched.rows.some(r => r.stop.done)
+      ? '✓ ' + sched.rows.filter(r => r.stop.done).length + ' of ' + sched.rows.length + ' done' : null,
     sched.walkKm >= 0.1 ? n1(sched.walkKm) + ' km on foot' : null,
     sched.otherKm >= 0.1 ? n1(sched.otherKm) + ' km other transport' : null,
   ].filter(Boolean);
@@ -639,11 +644,16 @@ function pageJs(storeKey){
       btn.setAttribute('aria-pressed', on ? 'true' : 'false');
       if(card) card.classList.toggle('done', on);
     }
-    paint(saved.visited.indexOf(id) !== -1);
+    // What the trip already said, unless this device has since said otherwise.
+    var wasDone = btn.getAttribute('aria-pressed') === 'true';
+    paint(saved.visited.indexOf('off:' + id) !== -1 ? false
+      : (wasDone || saved.visited.indexOf(id) !== -1));
     btn.addEventListener('click', function(){
       var on = btn.getAttribute('aria-pressed') !== 'true';
-      saved.visited = saved.visited.filter(function(x){ return x !== id; });
-      if(on) saved.visited.push(id);
+      // Both directions are recorded: unticking something the trip already
+      // called done has to survive a reload too.
+      saved.visited = saved.visited.filter(function(x){ return x !== id && x !== 'off:' + id; });
+      saved.visited.push(on ? id : 'off:' + id);
       paint(on);
       save();
     });
