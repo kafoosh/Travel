@@ -266,6 +266,7 @@ function renderDayPanel(){
       <h2>Day ${day.id} — ${esc(day.title)}</h2>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         ${date ? `<span class="day-date-tag">${formatDayDate(date)}</span>` : ''}
+        <span class="day-progress${dayProgressText(day) ? '' : ' hidden'}" id="day-progress" title="Stops ticked off on this day">${dayProgressText(day)}</span>
         <button class="reset-btn" id="edit-day-btn">✎ Edit day</button>
         <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">🗺 Google Maps</button>
         <button class="reset-btn" id="add-location-btn">+ Add location</button>
@@ -343,6 +344,64 @@ function renderDayPanel(){
   renderUnassignedTray($('day-unassigned'), day.id);
   renderScheduleList(day, sched);
   renderMap(day, sched);
+}
+
+/* =========================================================
+   DONE TICKS
+
+   A stop can be ticked off as you go. It lives on the stop
+   itself (not in this browser), so it exports with the trip
+   and everyone in a shared room sees the same crossed-off
+   plan — the point of ticking a stop on the way out of it is
+   that whoever you're travelling with knows too.
+
+   The tick never moves or hides anything: a done stop keeps
+   its place, its time and its number, and greys out. Nothing
+   in the schedule, the map or the optimiser reads it.
+   ========================================================= */
+function doneBtnHtml(stop){
+  const on = !!stop.done;
+  return `<button class="done-btn" type="button" aria-pressed="${on}" data-done-id="${esc(stop.id)}"` +
+    ` title="${on ? 'Done — click to untick' : 'Mark as done'}"` +
+    ` aria-label="${on ? 'Mark not done' : 'Mark done'}: ${esc(stop.name)}">✓</button>`;
+}
+
+/* Wire the button inside `root` (a card or row). The card greys out in
+   place — re-rendering the whole day would fight a fast series of ticks and
+   lose the scroll position. `after` refreshes anything that counts them. */
+function wireDoneBtn(root, id, after){
+  const btn = root.querySelector('.done-btn');
+  if(!btn) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = trip().stops[id];
+    if(!s) return;
+    pushUndo();
+    s.done = !s.done;
+    saveState();
+    const card = btn.closest('.stop-card, .bin-row');
+    if(card) card.classList.toggle('done', s.done);
+    btn.setAttribute('aria-pressed', String(!!s.done));
+    btn.title = s.done ? 'Done — click to untick' : 'Mark as done';
+    btn.setAttribute('aria-label', (s.done ? 'Mark not done: ' : 'Mark done: ') + s.name);
+    if(after) after();
+    updateUndoButton();
+  });
+}
+
+/* "3 of 7 done" in the day's header — only once something is ticked. */
+function dayProgressText(day){
+  const stops = day.order.map(id => trip().stops[id]).filter(Boolean);
+  const done = stops.filter(s => s.done).length;
+  return done ? '✓ ' + done + ' of ' + stops.length + ' done' : '';
+}
+
+function refreshDayProgress(day){
+  const el = $('day-progress');
+  if(!el) return;
+  const text = dayProgressText(day);
+  el.textContent = text;
+  el.classList.toggle('hidden', !text);
 }
 
 /* A travel connector line. `target` makes it clickable to override the leg's
@@ -438,7 +497,7 @@ function renderScheduleList(day, sched){
 
     const s = row.stop;
     const card = document.createElement('div');
-    card.className = 'stop-card' + (s.cat === 'travel' || s.cat === 'boat' ? ' travel-row' : '');
+    card.className = 'stop-card' + (s.cat === 'travel' || s.cat === 'boat' ? ' travel-row' : '') + (s.done ? ' done' : '');
     card.draggable = false;
     card.dataset.id = s.id;
 
@@ -478,6 +537,7 @@ function renderScheduleList(day, sched){
             <option value="">Move to…</option>
             ${dayOptionsHtml}
           </select>
+          ${doneBtnHtml(s)}
           <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">🗑</button>
         </div>
       </div>
@@ -496,6 +556,7 @@ function renderScheduleList(day, sched){
       if(v === 'optional') moveToOptional(day, s.id);
       else if(v) moveToDay(day, s.id, parseInt(v, 10));
     });
+    wireDoneBtn(card, s.id, () => refreshDayProgress(day));
     card.querySelector('.bin-btn').addEventListener('click', (e) => { e.stopPropagation(); removeToBin(day, s.id); });
 
     card.addEventListener('click', (e) => {
@@ -855,12 +916,14 @@ function renderMap(day, sched){
     order += 1;
     const icon = L.divIcon({
       className: '',
-      html: '<div class="map-pin"><span>' + order + '</span></div>',
+      // A ticked-off stop keeps its pin and its number — greyed, so the map
+      // reads as "here's what's left" at a glance.
+      html: '<div class="map-pin' + (s.done ? ' done-pin' : '') + '"><span>' + order + '</span></div>',
       iconSize: [26,26],
       iconAnchor: [13,24]
     });
     L.marker([s.lat, s.lng], { icon }).addTo(mapLayerGroup)
-      .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start));
+      .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start) + (s.done ? ' · ✓ done' : ''));
     const cur = [s.lat, s.lng];
     // travelPath on a row is the routed geometry of the leg ARRIVING at it
     // (computed in the same sequence computeSchedule walked).
@@ -961,23 +1024,44 @@ function openModal(stopId, row){
   const full = stop.detail ? (stop.desc + '\n\n' + stop.detail) : stop.desc;
   $('modal-text').textContent = full;
   $('modal-notes').value = stop.notes || '';
+  paintModalDone(stop);
 
   $('modal-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
   $('modal-close').focus();
   document.body.style.overflow = 'hidden';
 }
+function paintModalDone(stop){
+  const btn = $('modal-done');
+  if(!btn) return;
+  const on = !!stop.done;
+  btn.textContent = on ? '✓ Done — untick' : '✓ Mark as done';
+  btn.setAttribute('aria-pressed', String(on));
+  btn.classList.toggle('on', on);
+}
+
+function toggleModalDone(){
+  const s = modalStopId ? trip().stops[modalStopId] : null;
+  if(!s) return;
+  pushUndo();
+  s.done = !s.done;
+  saveState();
+  paintModalDone(s);
+  updateUndoButton();
+}
+
 function closeModal(){
   const hadStop = modalStopId;
   modalStopId = null;
   $('modal-overlay').classList.remove('open');
   document.body.style.overflow = '';
   if(lastFocusedEl && lastFocusedEl.focus) lastFocusedEl.focus();
-  // Notes may have changed while the modal was open — refresh so the 📝 chip
-  // (and anything else) reflects it immediately.
+  // Notes or the done tick may have changed while the modal was open —
+  // refresh so the 📝 chip (and the greyed-out card) reflect it immediately.
   if(hadStop){
     if(state.currentView === 'days') renderDayPanel();
     else if(state.currentView === 'optional') renderOptional();
+    else if(state.currentView === 'all') renderAllStops();
   }
 }
 
@@ -1080,6 +1164,10 @@ function submitLocationForm(e){
   pushUndo();
   const editId = $('al-editing').value;
   const id = editId || nextStopId();
+  // The form doesn't cover everything a stop carries: an edit rebuilds the
+  // object, so the fields it never asked about are carried across rather
+  // than quietly reset (a pinned transport mode, a done tick).
+  const prev = editId ? trip().stops[editId] : null;
   trip().stops[id] = {
     id, name, cat,
     dur: parseInt($('al-dur').value, 10) || DEFAULT_DUR[cat] || 45,
@@ -1088,6 +1176,8 @@ function submitLocationForm(e){
     endLat: (!isNaN(endLat) && !isNaN(endLng)) ? endLat : null,
     endLng: (!isNaN(endLat) && !isNaN(endLng)) ? endLng : null,
     fixedStart: /^\d{1,2}:\d{2}$/.test($('al-fixed').value) ? $('al-fixed').value : null,
+    arriveBy: prev ? prev.arriveBy || null : null,
+    done: prev ? !!prev.done : false,
     img: $('al-img').value.trim(),
     desc: $('al-desc').value.trim(),
     detail: $('al-detail').value.trim(),
@@ -1556,8 +1646,8 @@ function runSearch(){
     }
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'search-row';
-    row.innerHTML = `<span class="sr-icon">${ICONS[s.cat] || '📍'}</span>
+    row.className = 'search-row' + (s.done ? ' done' : '');
+    row.innerHTML = `<span class="sr-icon">${s.done ? '✓' : (ICONS[s.cat] || '📍')}</span>
       <span class="sr-main"><span class="sr-name">${esc(s.name)}</span>${whereHtml}</span>`;
     row.addEventListener('click', () => {
       closeSearch();
@@ -1598,7 +1688,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
   const s = trip().stops[id];
   if(!s) return null;
   const row = document.createElement('div');
-  row.className = 'bin-row all-row';
+  row.className = 'bin-row all-row' + (s.done ? ' done' : '');
   const dayOptions = trip().days.map(d =>
     `<option value="${d.id}" ${(!isOptional && fromDay && d.id === fromDay.id) ? 'selected' : (isOptional && optMeta && optMeta.day === d.id ? 'selected' : '')}>D${d.id} — ${esc(shortTitle(d.title))}</option>`).join('');
   row.innerHTML = `
@@ -1611,6 +1701,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
       ${isOptional
         ? `<select class="restore-to-day">${dayOptions}</select><button class="restore-btn">+ Add</button>`
         : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Unassigned</option></select>
+           ${doneBtnHtml(s)}
            <button class="bin-btn" title="Remove to bin">🗑</button>`}
       <span class="drag-handle" title="Drag to another day or position" role="button" tabindex="0">⠿</span>
     </div>`;
@@ -1660,6 +1751,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
       else if(v) moveToDay(fromDay, id, parseInt(v, 10));
       renderAllStops();
     });
+    wireDoneBtn(row, id, null);
     row.querySelector('.bin-btn').addEventListener('click', () => { removeToBin(fromDay, id); renderAllStops(); });
   }
   return row;
@@ -2780,6 +2872,7 @@ export function wireStaticHandlers(){
   on('modal-close', 'click', closeModal);
   on('modal-overlay', 'click', (e) => { if(e.target.id === 'modal-overlay') closeModal(); });
   on('modal-notes', 'input', saveNotesDebounced);
+  on('modal-done', 'click', toggleModalDone);
   on('modal-edit', 'click', () => {
     const id = modalStopId;
     closeModal();

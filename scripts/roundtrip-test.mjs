@@ -74,6 +74,27 @@ check('unknown day colour is dropped', (() => {
   const bad = parseTrip(serializeTrip(trip).replace('- color: teal', '- color: neon')).trip;
   return bad.days[0].color === null;
 })());
+check('done ticks survive a round-trip', (() => {
+  colosseum.done = true;
+  const t = parseTrip(serializeTrip(trip)).trip;
+  const c = Object.values(t.stops).find(s => s.name === 'Colosseum');
+  const others = Object.values(t.stops).filter(s => s.name !== 'Colosseum');
+  return c.done === true && others.every(s => s.done === false);
+})());
+check('an untouched trip writes no done lines', !serializeTrip(parseTrip(md).trip).includes('- done:'));
+check('done is written once ticked', (serializeTrip(trip).match(/^- done: yes$/gm) || []).length === 1);
+check('done accepts what a person or an LLM writes', (() => {
+  const src = serializeTrip(trip)
+    .replace('- done: yes', '- visited: TRUE')
+    .replace('### Roman Forum + Palatine Hill', '### Roman Forum + Palatine Hill\n- done: no');
+  const t = parseTrip(src).trip;
+  return Object.values(t.stops).find(s => s.name === 'Colosseum').done === true
+    && Object.values(t.stops).find(s => s.name === 'Roman Forum + Palatine Hill').done === false;
+})());
+check('done trip is still a fixed point', (() => {
+  const t = parseTrip(serializeTrip(trip)).trip;
+  return JSON.stringify(t) === JSON.stringify(parseTrip(serializeTrip(t)).trip);
+})());
 check('arrive-by survives', (() => {
   colosseum.arriveBy = 'taxi';
   trip.days[1].returnBy = 'cycle';
@@ -97,6 +118,11 @@ const { trip: ct } = parseCsv(csv);
 check('2 days created', ct.days.length === 2);
 check('optional row lands in optional', ct.optional.length === 1);
 check('quoted field with comma', Object.values(ct.stops)[0].desc === 'Book the summit, skip the line');
+check('csv done column', (() => {
+  const { trip: dt } = parseCsv('name,day,done\nSeen it,1,yes\nNot yet,1,\nAlso no,1,no');
+  const by = (n) => Object.values(dt.stops).find(s => s.name === n).done;
+  return by('Seen it') === true && by('Not yet') === false && by('Also no') === false;
+})());
 check('importText sniffs CSV', (() => { try{ return importText(csv).trip.days.length === 2; } catch(e){ return false; } })());
 check('importText sniffs markdown', (() => { try{ return importText(md).trip.days.length === 10; } catch(e){ return false; } })());
 check('garbage rejected with message', (() => { try{ importText('hello world'); return false; } catch(e){ return true; } })());
@@ -159,6 +185,17 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     return fo[d.id].reduce((n, id) => n + ((fresh.stops[id] || {}).dur || 0), 0);
   });
   check('auto-plan never mixes cities within a day', crossCity === 0, crossCity + ' mixed days');
+  check('auto-plan leaves ticked-off stops on their day', (() => {
+    // Mid-trip replan: what's already been visited must not be shuffled forward.
+    const t = parseTrip(md).trip;
+    const doneIds = [...t.days[1].order.slice(0, 3), ...t.days[2].order.slice(0, 2)];
+    doneIds.forEach(id => { t.stops[id].done = true; });
+    const { orders } = autoPlanOrders(t);
+    return doneIds.every(id => {
+      const was = t.days.find(d => d.order.includes(id)).id;
+      return (orders[was] || []).includes(id);
+    });
+  })());
   check('anchored stops stay on their day', anchorMoved === 0, String(anchorMoved));
   check('no day overloaded (visits ≤ 12h)', Math.max(...loads) <= 12 * 60, Math.max(...loads) + ' min');
   // anchors that opened their original day must still open it after replanning

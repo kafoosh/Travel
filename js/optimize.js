@@ -29,6 +29,14 @@ import { getHotel } from './schedule.js';
 const DAY_END_MIN = 22 * 60 + 30;   // assume nobody plans past ~10:30pm
 const ANCHOR_CATS = ['travel', 'boat', 'hotel', 'flight'];
 
+/* Stops auto-plan may not move between days: the fixed points of the trip
+   (a flight, a train, a check-in) and anything already ticked off — a stop
+   you have visited belongs to the day you visited it, whatever a replan of
+   the days ahead would prefer. */
+function isPinned(stop){
+  return ANCHOR_CATS.includes(stop.cat) || !!stop.done;
+}
+
 function legMinutes(a, b, boat){
   return knownMinutes(a, b, { boat });
 }
@@ -235,9 +243,8 @@ function placeMeals(day, seq){
   });
 
   // insertion bounds: never before leading anchors or after trailing ones
-  const isAnchor = s => ANCHOR_CATS.includes(s.cat);
-  const lo = () => { let n = 0; while(n < base.length && isAnchor(base[n])) n++; return n; };
-  const hi = () => { let n = base.length; while(n > 0 && isAnchor(base[n - 1])) n--; return n; };
+  const lo = () => { let n = 0; while(n < base.length && isPinned(base[n])) n++; return n; };
+  const hi = () => { let n = base.length; while(n > 0 && isPinned(base[n - 1])) n--; return n; };
 
   const order = ['lunch', 'dinner', 'any'];
   foods.sort((a, b) => order.indexOf(roles.get(a)) - order.indexOf(roles.get(b)))
@@ -267,11 +274,11 @@ export function autoPlanOrders(trip){
   const stopOf = id => trip.stops[id];
 
   const fixedNoCoord = days.map(d => d.order.filter(id => { const s = stopOf(id); return !s || s.lat == null; }));
-  const anchorsByDay = days.map(d => d.order.map(stopOf).filter(s => s && s.lat != null && ANCHOR_CATS.includes(s.cat)));
+  const anchorsByDay = days.map(d => d.order.map(stopOf).filter(s => s && s.lat != null && isPinned(s)));
   const movable = [];
   days.forEach(d => d.order.forEach(id => {
     const s = stopOf(id);
-    if(s && s.lat != null && !ANCHOR_CATS.includes(s.cat)) movable.push(s);
+    if(s && s.lat != null && !isPinned(s)) movable.push(s);
   }));
 
   if(movable.length < 2 || k < 1){

@@ -95,6 +95,9 @@ function stopLines(s){
   out.push('- duration: ' + (s.dur ?? DEFAULT_DUR[s.cat] ?? 45));
   if(s.fixedStart) out.push('- fixed start: ' + s.fixedStart);
   if(s.arriveBy) out.push('- arrive by: ' + s.arriveBy);
+  // Ticked off on the trip itself — written only when true, so a plan that
+  // hasn't started yet reads exactly as it always did.
+  if(s.done) out.push('- done: yes');
   if(s.img) out.push('- image: ' + encVal(s.img));
   if(s.desc) out.push('- description: ' + encVal(s.desc));
   if(s.detail) out.push('- detail: ' + encVal(s.detail));
@@ -207,6 +210,7 @@ const KEY_ALIASES = {
   description:'desc', desc:'desc', 'short description':'desc', summary:'desc',
   detail:'detail', details:'detail', history:'detail', trivia:'detail', 'long description':'detail',
   notes:'notes', note:'notes',
+  done:'done', visited:'done', completed:'done', seen:'done',
   tags:'tags',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
@@ -233,6 +237,14 @@ function kvLine(line){
   const key = KEY_ALIASES[m[1].trim().toLowerCase()];
   if(!key) return null;
   return { key, value: m[2].trim() };
+}
+
+/* A yes/no field as a person or an LLM might write it. A bare "- done:" with
+   nothing after it means yes — the line was written to say so. */
+function isYes(v){
+  const s = String(v || '').trim().toLowerCase();
+  if(!s) return true;
+  return /^(y|yes|true|1|x|✓|✔|done|visited)$/.test(s);
 }
 
 function parseDuration(v){
@@ -326,6 +338,7 @@ export function parseTrip(text){
         endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
         fixedStart: cur.fixedStart || null,
         arriveBy: cur.arriveBy || null,
+        done: !!cur.done,
         img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
         notes: cur.notes || '', tags: cur.tags || [] };
       trip.stops[id] = stop;
@@ -409,6 +422,7 @@ export function parseTrip(text){
         else if(key === 'arriveBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) cur.arriveBy = v; }
         else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
         else if(key === 'cat') cur.cat = normCat(value);
+        else if(key === 'done') cur.done = isYes(value);
         else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
         else if(key === 'sday' && curOptMeta){ const n = parseInt(value, 10); if(!isNaN(n)) curOptMeta.day = n; }
         else if(key === 'snote' && curOptMeta) curOptMeta.note = decVal(value);
@@ -476,7 +490,7 @@ function splitCsvLine(line, delim){
 }
 
 /* Accepts a CSV with a header row. Recognised columns (any order, case-insensitive):
-   name, day, lat, lng, category, duration, description, detail, image, notes, tags.
+   name, day, lat, lng, category, duration, description, detail, image, notes, tags, done.
    day may be a number, "unassigned"/"optional", or empty (→ day 1). */
 export function parseCsv(text){
   const warnings = [];
@@ -495,6 +509,7 @@ export function parseCsv(text){
     img: ['image','img','photo'].map(col).find(i => i !== -1) ?? -1,
     notes: ['notes','note'].map(col).find(i => i !== -1) ?? -1,
     tags: col('tags'),
+    done: ['done','visited','completed'].map(col).find(i => i !== -1) ?? -1,
   };
   if(idx.name === -1) throw new Error('CSV must have a "name" column.');
 
@@ -517,6 +532,7 @@ export function parseCsv(text){
       lat: isNaN(lat) ? null : lat, lng: isNaN(lng) ? null : lng,
       img: get(cells, idx.img), desc: get(cells, idx.desc), detail: get(cells, idx.detail),
       notes: get(cells, idx.notes),
+      done: idx.done !== -1 && !!get(cells, idx.done) && isYes(get(cells, idx.done)),
       tags: get(cells, idx.tags) ? get(cells, idx.tags).split(/[,|]/).map(t => t.trim()).filter(Boolean) : []
     };
     const dayRaw = get(cells, idx.day).toLowerCase();
