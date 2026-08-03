@@ -1,12 +1,17 @@
 /* =========================================================
    EXTERNAL MAP EXPORTS
 
+   - dayMapPoints: the day's located points in visit order —
+     hotel bookends, stops, hike end points — labelled so the UI
+     can offer them for picking.
+
    - googleMapsDayUrl: a plain Google Maps directions link for
-     one day's stops in visit order (walking). No API, no key —
-     just the documented maps.google.com/dir/?api=1 URL scheme,
-     openable and shareable on any device. Google caps waypoints
-     at 9 between origin and destination (11 points total); we
-     report truncation so the UI can say so.
+     one day's stops in visit order (walking), optionally only
+     the points the user picked. No API, no key — just the
+     documented maps.google.com/dir/?api=1 URL scheme, openable
+     and shareable on any device. Google caps waypoints at 9
+     between origin and destination (11 points total); we report
+     truncation so the UI can say so.
 
    - tripKml: the whole trip as a KML file — one folder per day
      with numbered placemarks and a route line, plus Optional —
@@ -31,29 +36,35 @@ function xmlEsc(s){
     .replaceAll('"','&quot;').replaceAll("'",'&apos;');
 }
 
-/* Ordered [lat,lng,label] points for a day: hotel bookends + stops + hike ends. */
-function dayPoints(trip, day){
+/* Ordered points for a day: hotel bookends + stops + hike ends. Each is
+   {lat, lng, label, cat, when} — `when` is the scheduled time for stops and
+   a plain word for the bookends, so a picker can name what it is offering. */
+export function dayMapPoints(trip, day){
   const sched = computeSchedule(trip, day);
   const pts = [];
   const hotel = sched.hotel;
   const bookend = day.bookend || 'both';
-  if(hotel && hotel.lat != null && bookend !== 'end') pts.push([hotel.lat, hotel.lng, hotel.name]);
+  if(hotel && hotel.lat != null && bookend !== 'end')
+    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'Start of the day' });
   sched.rows.forEach(r => {
     const s = r.stop;
     if(s.lat == null) return;
-    pts.push([s.lat, s.lng, s.name]);
-    if(s.cat === 'hike' && s.endLat != null) pts.push([s.endLat, s.endLng, s.name + ' (hike end)']);
+    pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start) });
+    if(s.cat === 'hike' && s.endLat != null)
+      pts.push({ lat: s.endLat, lng: s.endLng, label: s.name + ' (hike end)', cat: 'hike', when: '' });
   });
-  if(hotel && hotel.lat != null && bookend !== 'start' && pts.length) pts.push([hotel.lat, hotel.lng, hotel.name]);
+  if(hotel && hotel.lat != null && bookend !== 'start' && pts.length)
+    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'End of the day' });
   return pts;
 }
 
-export function googleMapsDayUrl(trip, day){
-  const pts = dayPoints(trip, day);
-  if(pts.length < 2) return { url: null, truncated: false };
-  const MAXPTS = 11;                    // origin + 9 waypoints + destination
+const MAXPTS = 11;                      // origin + 9 waypoints + destination
+
+/* A directions link through the given points, in the order given. */
+export function googleMapsUrl(pts){
+  if(!pts || pts.length < 2) return { url: null, truncated: false };
   const use = pts.length > MAXPTS ? pts.slice(0, MAXPTS) : pts;
-  const fmt = p => p[0].toFixed(5) + ',' + p[1].toFixed(5);
+  const fmt = p => p.lat.toFixed(5) + ',' + p.lng.toFixed(5);
   const params = new URLSearchParams({
     api: '1',
     origin: fmt(use[0]),
@@ -62,6 +73,10 @@ export function googleMapsDayUrl(trip, day){
   });
   if(use.length > 2) params.set('waypoints', use.slice(1, -1).map(fmt).join('|'));
   return { url: 'https://www.google.com/maps/dir/?' + params.toString(), truncated: pts.length > MAXPTS };
+}
+
+export function googleMapsDayUrl(trip, day){
+  return googleMapsUrl(dayMapPoints(trip, day));
 }
 
 export function tripKml(trip){
@@ -92,12 +107,12 @@ export function tripKml(trip){
       L.push(placemark(n + '. ' + s.name, desc, s.lat, s.lng));
       if(s.cat === 'hike' && s.endLat != null) L.push(placemark(n + 'b. ' + s.name + ' (hike end)', '', s.endLat, s.endLng));
     });
-    const pts = dayPoints(trip, day);
+    const pts = dayMapPoints(trip, day);
     if(pts.length > 1){
       L.push('<Placemark><name>' + xmlEsc('Day ' + day.id + ' route') + '</name><styleUrl>#route' +
         (DAY_COLORS[day.color] ? '-' + day.color : '') + '</styleUrl>' +
         '<LineString><tessellate>1</tessellate><coordinates>' +
-        pts.map(p => p[1] + ',' + p[0] + ',0').join(' ') +
+        pts.map(p => p.lng + ',' + p.lat + ',0').join(' ') +
         '</coordinates></LineString></Placemark>');
     }
     L.push('</Folder>');

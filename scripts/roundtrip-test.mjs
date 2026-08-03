@@ -170,7 +170,7 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     Math.min(...loads) + '–' + Math.max(...loads) + ' min');
 
   /* --- 5. external map exports --- */
-  import('../js/exporters.js').then(({ googleMapsDayUrl, tripKml }) => {
+  import('../js/exporters.js').then(({ googleMapsDayUrl, googleMapsUrl, dayMapPoints, tripKml }) => {
     console.log('map exports:');
     const t = parseTrip(md).trip;
     const { url, truncated } = googleMapsDayUrl(t, t.days[1]);
@@ -179,6 +179,14 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     check('gmaps origin is the day-2 hotel', !!url && decodeURIComponent(url).includes('origin=41.9053'), 'day 2 starts at the Tribune');
     const big = googleMapsDayUrl(t, t.days.reduce((b, d) => d.order.length > b.order.length ? d : b));
     check('waypoint cap reported honestly', typeof big.truncated === 'boolean');
+    const pts = dayMapPoints(t, t.days[1]);
+    check('day points are named for the picker', pts.length > 2 && pts.every(p => p.label && p.lat != null));
+    const picked = [pts[0], pts[2]];
+    const two = googleMapsUrl(picked);
+    check('a picked pair routes with no waypoints', !!two.url && !two.url.includes('waypoints=') && !two.truncated);
+    check('a picked pair uses the picked ends', !!two.url &&
+      decodeURIComponent(two.url).includes('destination=' + picked[1].lat.toFixed(5)));
+    check('one point is not a route', googleMapsUrl([pts[0]]).url === null);
     const kml = tripKml(t);
     const placemarks = (kml.match(/<Placemark>/g) || []).length;
     check('kml has a folder per day + optional', (kml.match(/<Folder>/g) || []).length === 11);

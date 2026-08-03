@@ -260,6 +260,27 @@
   </div>
 </div>
 
+<!-- Google Maps route picker: choose which of the day's points to navigate between -->
+<div class="modal-overlay" id="gmaps-overlay">
+  <div class="modal-box">
+    <button class="modal-close" id="gmaps-close" aria-label="Close">✕</button>
+    <div class="modal-content">
+      <h3 class="modal-title" id="gmaps-heading">Open in Google Maps</h3>
+      <p class="ap-sub">Tick the stops to navigate between — they're used in the order shown.</p>
+      <div class="gmaps-tools">
+        <button type="button" class="reset-btn" id="gmaps-all">☑ Select all</button>
+        <button type="button" class="reset-btn" id="gmaps-none">☐ Select none</button>
+        <span class="gmaps-count" id="gmaps-count"></span>
+      </div>
+      <div id="gmaps-list" class="gmaps-list"></div>
+      <p class="al-hint" id="gmaps-note"></p>
+      <div class="modal-actions">
+        <button class="reset-btn" id="gmaps-open">🗺 Open in Google Maps</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Search modal -->
 <div class="modal-overlay" id="search-overlay">
   <div class="modal-box search-box">
