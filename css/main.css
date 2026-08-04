@@ -1440,9 +1440,23 @@ h1.title:hover{color:var(--accent-dark);}
   border-bottom:1px dashed var(--line);
 }
 .check-row:last-child{ border-bottom:none; }
-.check-box{ display:flex; align-items:center; gap:10px; flex:1; min-width:0; cursor:pointer; }
-.check-box input[type="checkbox"]{ width:19px; height:19px; flex:none; accent-color:var(--accent); cursor:pointer; }
-.check-text{ font-size:14px; color:var(--ink); line-height:1.4; overflow-wrap:anywhere; }
+.check-tick{ width:19px; height:19px; flex:none; margin:0; accent-color:var(--accent); cursor:pointer; }
+.check-text{
+  flex:1; min-width:0;
+  font-size:14px; color:var(--ink); line-height:1.4; overflow-wrap:anywhere;
+  cursor:text; border-radius:6px; padding:2px 4px; margin:-2px -4px;
+}
+.check-text:hover{ background:var(--paper-card); }
+.check-text:focus-visible{ outline:1px solid var(--ink-soft); outline-offset:1px; }
+/* The editor sits exactly where the text was, so the row doesn't jump. */
+.check-edit{
+  flex:1; min-width:0;
+  font-family:'Work Sans', sans-serif; font-size:14px; line-height:1.4;
+  color:var(--ink); background:var(--paper-card);
+  border:1px solid var(--ink-soft); border-radius:6px;
+  padding:2px 4px; margin:-3px -5px;
+}
+.check-edit:focus{ outline:none; }
 .check-del{
   flex:none; background:none; border:none; cursor:pointer;
   color:var(--ink-soft); font-size:14px; padding:4px 8px; border-radius:6px;
@@ -1777,7 +1791,9 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .check-add input{ flex:1 1 auto; min-width:0; min-height:44px; }
   .check-add .reset-btn{ flex:0 0 auto; min-height:44px; padding:8px 14px; }
   .check-row{ padding:11px 2px; }
-  .check-box input[type="checkbox"]{ width:23px; height:23px; }
+  .check-tick{ width:23px; height:23px; }
+  /* Room for a thumb on the text without the tap target shrinking the row. */
+  .check-text{ padding:6px 4px; margin:-6px -4px; }
   .check-del{ min-width:44px; min-height:44px; font-size:16px; }
   .ic-edit{ min-height:32px; padding:6px 12px; }
 
