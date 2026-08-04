@@ -62,7 +62,14 @@
 <div class="wrap">
 
   <section id="view-days">
-    <div class="daytabs" id="daytabs"></div>
+    <!-- The strip scrolls sideways when a trip outgrows the row. The native
+         scrollbar is hidden and replaced by the two arrows + edge fades, which
+         only appear (see .can-prev/.can-next) when there is more to reach. -->
+    <div class="daytabs-wrap" id="daytabs-wrap">
+      <button type="button" class="daytabs-nav prev" id="daytabs-prev" aria-label="Show earlier days" tabindex="-1">‹</button>
+      <div class="daytabs" id="daytabs"></div>
+      <button type="button" class="daytabs-nav next" id="daytabs-next" aria-label="Show later days" tabindex="-1">›</button>
+    </div>
     <div class="daypanel" id="daypanel"></div>
   </section>
 

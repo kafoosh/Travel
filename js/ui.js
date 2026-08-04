@@ -184,15 +184,43 @@ function renderTabs(){
   });
   el.appendChild(add);
 
-  // Keep the active tab in view when the strip scrolls (mobile). Horizontal
-  // scroll on the strip only — scrollIntoView could also scroll the page.
-  // Both offsetLefts are body-relative (nothing between tab and body is a
-  // positioned ancestor), so subtract the strip's own offset.
+  // Keep the active tab in view when the strip scrolls. Horizontal scroll on
+  // the strip only — scrollIntoView could also scroll the page. Measured off
+  // the rendered boxes rather than offsetLeft: the strip is sticky (so it is
+  // its own offsetParent on mobile but not on desktop, where the wrapper is),
+  // and rects don't care which.
   const active = el.querySelector('.daytab.active');
   if(active && el.scrollWidth > el.clientWidth){
-    const target = active.offsetLeft - el.offsetLeft - (el.clientWidth - active.offsetWidth) / 2;
+    const target = el.scrollLeft + active.getBoundingClientRect().left - el.getBoundingClientRect().left
+      - (el.clientWidth - active.offsetWidth) / 2;
     el.scrollLeft = Math.max(0, Math.min(target, el.scrollWidth - el.clientWidth));
   }
+  syncTabNav();
+}
+
+/* Show each scroll arrow only while there are tabs that way, and fade the
+   ends to match. Runs after every render, on scroll, and on resize — the
+   strip's own listeners are wired once, not per render. */
+function syncTabNav(){
+  const el = $('daytabs'), wrap = $('daytabs-wrap');
+  if(!el || !wrap) return;
+  const slack = el.scrollWidth - el.clientWidth;
+  wrap.classList.toggle('can-prev', el.scrollLeft > 1);
+  wrap.classList.toggle('can-next', slack > 1 && el.scrollLeft < slack - 1);
+}
+
+function wireTabNav(){
+  const el = $('daytabs'), wrap = $('daytabs-wrap');
+  if(!el || !wrap) return;
+  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const step = (dir) => el.scrollBy({
+    left: dir * Math.max(180, el.clientWidth * 0.8),
+    behavior: smooth ? 'smooth' : 'auto',
+  });
+  wrap.querySelector('.daytabs-nav.prev').addEventListener('click', () => step(-1));
+  wrap.querySelector('.daytabs-nav.next').addEventListener('click', () => step(1));
+  el.addEventListener('scroll', syncTabNav, { passive:true });
+  window.addEventListener('resize', syncTabNav);
 }
 
 /* Move the day at `from` so it lands at index `to` of the *current* list
@@ -1993,10 +2021,56 @@ const INFO_CARDS = [
   ['notes', '📝', 'General notes', 'Anything else — transport tips, etiquette, scams to avoid…'],
 ];
 
+/* Checklist rows carry their own MIME type: a row dragged over anything else
+   that accepts a drop (a day tab, a stop list) must not read as that thing's
+   drag, and vice versa. */
+const CHECK_DND = 'application/x-travel-check';
+const isCheckDrag = (e) => Array.from(e.dataTransfer.types || []).includes(CHECK_DND);
+const clearCheckMarks = () => document.querySelectorAll('.check-row').forEach(r => r.classList.remove('drop-before','drop-after'));
+
+/* Move one row so it lands just before (or after) another. The rows on screen
+   are the open half of the list, but the array also holds ticked items — they
+   wait in the Bin to be brought back — so only the open slots are rewritten
+   and the ticked ones stay where they are. */
+function moveChecklist(dragId, targetId, before){
+  const list = trip().checklist;
+  const slots = [];
+  list.forEach((c, i) => { if(!c.done) slots.push(i); });
+  const open = slots.map(i => list[i]);
+  const from = open.findIndex(c => c.id === dragId);
+  let to = open.findIndex(c => c.id === targetId);
+  if(from < 0 || to < 0 || dragId === targetId) return;
+  if(!before) to++;
+  if(to > from) to--;              // the row is lifted out before it lands
+  if(to === from) return;
+  pushUndo();
+  const [moved] = open.splice(from, 1);
+  open.splice(to, 0, moved);
+  slots.forEach((pos, k) => { list[pos] = open[k]; });
+  saveState();
+  renderInfo();
+  updateUndoButton();
+}
+
+/* ↑ / ↓ from the grip — the same move, one row at a time, for keyboards. */
+function nudgeChecklist(id, delta){
+  const open = trip().checklist.filter(c => !c.done);
+  const i = open.findIndex(c => c.id === id);
+  const j = i + delta;
+  if(i < 0 || j < 0 || j >= open.length) return;
+  moveChecklist(id, open[j].id, delta < 0);
+  const moved = document.querySelector(`.check-row[data-id="${CSS.escape(id)}"] .check-grip`);
+  if(moved) moved.focus();
+}
+
 /* The open half of the checklist. Ticking an item doesn't delete it — it
    moves to the Bin's completed section, where it can be brought back.
    Only the box ticks: clicking the text opens it for editing instead, so a
-   mis-aimed click reworded an item rather than filing it away. */
+   mis-aimed click reworded an item rather than filing it away.
+
+   A row is either an item or a section heading (type:'header') — headings are
+   plain dividers with no box to tick, and they drag and edit like any other
+   row, so grouping the list is just typing a name and dragging rows under it. */
 function renderChecklist(){
   const el = $('check-list');
   if(!el) return;
@@ -2007,18 +2081,91 @@ function renderChecklist(){
   }
   el.innerHTML = '';
   open.forEach(item => {
+    const head = item.type === 'header';
     const row = document.createElement('div');
-    row.className = 'check-row';
+    row.className = 'check-row' + (head ? ' check-head' : '');
+    row.dataset.id = item.id;
     row.innerHTML = `
-      <input type="checkbox" class="check-tick" aria-label="Mark done: ${esc(item.text)}">
+      <span class="check-grip" role="button" tabindex="0" title="Drag to reorder (or focus and press ↑ / ↓)"
+            aria-label="Reorder ${esc(item.text)}: drag, or press arrow up and arrow down">⠿</span>
+      ${head ? '' : `<input type="checkbox" class="check-tick" aria-label="Mark done: ${esc(item.text)}">`}
       <span class="check-text" role="button" tabindex="0" title="Click to edit">${esc(item.text)}</span>
-      <button type="button" class="check-del" title="Delete this item">✕</button>`;
-    row.querySelector('.check-tick').addEventListener('change', () => {
+      <button type="button" class="check-del" title="${head ? 'Delete this heading (the items below stay)' : 'Delete this item'}">✕</button>`;
+    if(!head) row.querySelector('.check-tick').addEventListener('change', () => {
       pushUndo();
       item.done = true;
       saveState();
       renderInfo();
       updateUndoButton();
+    });
+
+    // --- Reorder: drag from the grip (mouse), press it (touch), or ↑ / ↓ ---
+    const grip = row.querySelector('.check-grip');
+    grip.addEventListener('mousedown', () => { row.draggable = true; });
+    grip.addEventListener('mouseup', () => { row.draggable = false; });
+    grip.addEventListener('keydown', (e) => {
+      if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      nudgeChecklist(item.id, e.key === 'ArrowUp' ? -1 : 1);
+    });
+    row.addEventListener('dragstart', (e) => {
+      row.classList.add('dragging');
+      e.dataTransfer.setData(CHECK_DND, item.id);
+      e.dataTransfer.setData('text/plain', item.text);   // Safari wants a text flavour
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.draggable = false;
+      row.classList.remove('dragging');
+      clearCheckMarks();
+    });
+    row.addEventListener('dragover', (e) => {
+      if(!isCheckDrag(e)) return;
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      row.classList.toggle('drop-before', before);
+      row.classList.toggle('drop-after', !before);
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drop-before','drop-after'));
+    row.addEventListener('drop', (e) => {
+      if(!isCheckDrag(e)) return;
+      e.preventDefault();
+      const rect = row.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      clearCheckMarks();
+      moveChecklist(e.dataTransfer.getData(CHECK_DND), item.id, before);
+    });
+    grip.addEventListener('pointerdown', (ev) => {
+      if(ev.pointerType === 'mouse') return;      // mouse uses the HTML5 drag above
+      ev.preventDefault();
+      row.classList.add('touch-dragging');
+      let lastTarget = null, lastBefore = false;
+      const onMove = (mv) => {
+        const under = document.elementFromPoint(mv.clientX, mv.clientY);
+        const overRow = under && under.closest ? under.closest('.check-row') : null;
+        clearCheckMarks();
+        if(overRow && overRow !== row){
+          const r = overRow.getBoundingClientRect();
+          lastBefore = (mv.clientY - r.top) < r.height / 2;
+          overRow.classList.toggle('drop-before', lastBefore);
+          overRow.classList.toggle('drop-after', !lastBefore);
+          lastTarget = overRow.dataset.id;
+        } else {
+          lastTarget = null;
+        }
+      };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        row.classList.remove('touch-dragging');
+        clearCheckMarks();
+        if(lastTarget) moveChecklist(item.id, lastTarget, lastBefore);
+      };
+      document.addEventListener('pointermove', onMove, { passive:true });
+      document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
     });
 
     /* Swap the text for an input in place. Saving on blur keeps Enter, a
@@ -2032,7 +2179,7 @@ function renderChecklist(){
       input.type = 'text';
       input.className = 'check-edit';
       input.value = item.text;
-      input.setAttribute('aria-label', 'Edit item: ' + item.text);
+      input.setAttribute('aria-label', (head ? 'Edit heading: ' : 'Edit item: ') + item.text);
       let cancelled = false;
       const stopEdit = () => {
         const val = input.value.trim();
@@ -2112,16 +2259,19 @@ export function renderInfo(){
   const el = $('infogrid');
   const t = trip();
 
-  const open = t.checklist.filter(c => !c.done);
-  const doneCount = t.checklist.length - open.length;
+  // Headings are dividers, not work: they count towards neither figure.
+  const openCount = t.checklist.filter(c => !c.done && c.type !== 'header').length;
+  const doneCount = t.checklist.filter(c => c.done).length;
 
   el.innerHTML = `
     <div class="infocard span-all">
       <h3><span class="ic-icon" aria-hidden="true">✅</span> Checklist
-        ${open.length ? `<span class="ic-count">${open.length} open</span>` : ''}</h3>
+        ${openCount ? `<span class="ic-count">${openCount} open</span>` : ''}</h3>
       <form class="check-add" id="check-add-form">
         <input type="text" id="check-add-input" placeholder="Add a to-do — book tickets, renew passport…" autocomplete="off">
         <button type="submit" class="reset-btn">+ Add</button>
+        <button type="button" class="reset-btn check-add-head" id="check-add-head"
+                title="Add what you've typed as a section heading — a divider to group the rows under it">+ Section</button>
       </form>
       <div class="check-list" id="check-list"></div>
       ${doneCount ? `<p class="check-done-note">${doneCount} completed item${doneCount === 1 ? '' : 's'} — in the <button type="button" class="linklike" id="check-to-bin">Bin</button>, where they can be brought back.</p>` : ''}
@@ -2190,20 +2340,26 @@ export function renderInfo(){
 
   // checklist
   renderChecklist();
-  $('check-add-form').addEventListener('submit', (e) => {
-    e.preventDefault();
+  /* One input, two buttons: what's typed lands as a to-do, or as a heading to
+     group the rows under it. Both keep the caret in the box, so a section and
+     its first few items can be typed in one go. */
+  const addCheck = (header) => {
     const input = $('check-add-input');
     const text = input.value.trim();
-    if(!text) return;
+    if(!text){ input.focus(); return; }
     pushUndo();
-    trip().checklist.push({ id: nextChecklistId(), text, done: false });
+    trip().checklist.push(header
+      ? { id: nextChecklistId(), text, type:'header', done: false }
+      : { id: nextChecklistId(), text, done: false });
     input.value = '';
     saveState();
     renderInfo();
     updateUndoButton();
     const again = $('check-add-input');
     if(again) again.focus();     // keep adding without re-clicking
-  });
+  };
+  $('check-add-form').addEventListener('submit', (e) => { e.preventDefault(); addCheck(false); });
+  $('check-add-head').addEventListener('click', () => addCheck(true));
   const toBin = $('check-to-bin');
   if(toBin) toBin.addEventListener('click', () => setView('bin'));
 
@@ -2819,6 +2975,7 @@ function ac(id, onPick, onStatus){
 }
 
 export function wireStaticHandlers(){
+  wireTabNav();
   on('btn-view-days', 'click', () => setView('days'));
   on('btn-view-all', 'click', () => setView('all'));
   on('btn-view-bin', 'click', () => setView('bin'));

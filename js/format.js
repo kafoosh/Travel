@@ -174,7 +174,12 @@ export function serializeTrip(trip){
 
   if((trip.checklist || []).length){
     L.push('## Checklist', '');
-    trip.checklist.forEach(c => L.push('- [' + (c.done ? 'x' : ' ') + '] ' + encVal(c.text)));
+    // Section headings ride out as "###" — real markdown structure, and the
+    // parser below reads them back as headings rather than as items.
+    trip.checklist.forEach(c => {
+      if(c.type === 'header') L.push('', '### ' + encVal(c.text), '');
+      else L.push('- [' + (c.done ? 'x' : ' ') + '] ' + encVal(c.text));
+    });
     L.push('');
   }
 
@@ -383,6 +388,12 @@ export function parseTrip(text){
        mistaken for a stop or a field. "[x]" marks done; a bare line (markers
        stripped by a chat UI) still counts as an open item. */
     if(section === 'checklist'){
+      const headM = /^###\s+(.+)$/.exec(line);
+      if(headM){
+        const htext = headM[1].trim();
+        if(htext) trip.checklist.push({ id: 'k' + (trip.checklist.length + 1), text: decVal(htext), type:'header', done:false });
+        continue;
+      }
       const m = /^[-*]?\s*\[([ xX])\]\s*(.*)$/.exec(line);
       const text = m ? m[2].trim() : line.replace(/^[-*]\s*/, '').trim();
       if(text) trip.checklist.push({ id: 'k' + (trip.checklist.length + 1), text: decVal(text), done: !!(m && m[1].toLowerCase() === 'x') });

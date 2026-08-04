@@ -370,7 +370,11 @@ function infoHtml(trip, opts){
   const live = (trip.checklist || []).filter(c => !c.done);
   const done = (trip.checklist || []).filter(c => c.done);
   if(live.length || done.length){
-    const row = (c) => `<label class="check"><input type="checkbox" data-check="${esc(c.id)}"${c.done ? ' checked' : ''}><span>${esc(c.text)}</span></label>`;
+    // Section headings keep their place among the open rows; ticked items are
+    // collected at the end, past the last section, exactly as they read here.
+    const row = (c) => c.type === 'header'
+      ? `<p class="check-sec">${esc(c.text)}</p>`
+      : `<label class="check"><input type="checkbox" data-check="${esc(c.id)}"${c.done ? ' checked' : ''}><span>${esc(c.text)}</span></label>`;
     cards.push(`<div class="card"><h3>✅ Checklist</h3>${live.map(row).join('')}${done.map(row).join('')}
       <p class="quiet small">Ticks here are kept on this device only — they don't travel back to the planner.</p></div>`);
   }
@@ -514,6 +518,8 @@ svg.map .sc text{fill:var(--ink-soft); font-family:var(--mono); font-size:11px;}
 .check{display:flex; gap:9px; align-items:flex-start; padding:6px 0; font-size:14.5px; cursor:pointer;}
 .check input{width:18px; height:18px; margin-top:2px; accent-color:var(--accent); flex:none;}
 .check input:checked + span{text-decoration:line-through; color:var(--ink-soft);}
+.check-sec{margin:12px 0 2px; font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--ink-soft);}
+.check-sec:first-child{margin-top:0;}
 
 footer{margin-top:28px; padding-top:16px; border-top:1px solid var(--line); font-size:13.5px; color:var(--ink-soft);}
 footer h3{font-size:15px; margin-bottom:6px; color:var(--ink);}
