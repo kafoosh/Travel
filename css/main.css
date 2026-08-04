@@ -288,13 +288,22 @@ h1.title:hover{color:var(--accent-dark);}
 .cloud-warn{font-size:13px; color:var(--ink-soft); margin:12px 0 0;}
 
 /* ---------- Day tabs ---------- */
+/* The strip scrolls sideways once a trip outgrows the row. The native
+   scrollbar sat right under the tabs and was the loudest thing in the strip,
+   so it's hidden: touch swipes, and desktop gets the arrows + edge fades
+   defined in the DESKTOP REFINEMENTS block (.daytabs-nav). */
+.daytabs-wrap{ position:relative; }
 .daytabs{
   display:flex;
   gap:6px;
   overflow-x:auto;
-  padding:22px 4px 8px;
-  scrollbar-width:thin;
+  padding:22px 4px 0;
+  scrollbar-width:none;
+  -ms-overflow-style:none;
 }
+.daytabs::-webkit-scrollbar{ display:none; }
+/* Hidden until there's something that way to scroll to — see syncTabNav(). */
+.daytabs-nav{ display:none; }
 /* Two lines — "D5 · Tue Sep 30" over the title — and a hard width cap. A day
    called "Travel & Arrival" used to stretch its tab past the edge of the
    screen; now the title ellipsizes and every tab stays a similar size. */
@@ -936,22 +945,56 @@ h1.title:hover{color:var(--accent-dark);}
      bar reads slim without changing its in-flow spacing under the nav. The
      background is pulled full-bleed (negative margin + matching padding) so
      the panel sliding beneath never shows through beside the tabs. */
-  .daytabs{
+  .daytabs-wrap{
     position:sticky;
     top:-12px;
     z-index:45;
     background:var(--paper);
     margin:0 -20px;
-    padding:22px 24px 8px;
+    padding:0 20px;
   }
+  .daytabs{ padding-left:4px; padding-right:4px; }
+
+  /* Scroll arrows: the fade IS the button — one element gives both the hint
+     that the row continues and the click target that follows it. They cover
+     the strip's tab row only (top:22px clears its head-room), and stay out of
+     the tab order: every tab is focusable and scrolls itself into view, so a
+     keyboard never needs them. */
+  .daytabs-nav{
+    position:absolute;
+    top:22px;
+    bottom:0;
+    width:44px;
+    align-items:center;
+    border:none;
+    padding:0 3px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:19px;
+    line-height:1;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .daytabs-nav:hover{ color:var(--ink); }
+  .daytabs-nav.prev{
+    left:0;
+    justify-content:flex-start;
+    background:linear-gradient(to right, var(--paper) 58%, transparent);
+  }
+  .daytabs-nav.next{
+    right:0;
+    justify-content:flex-end;
+    background:linear-gradient(to left, var(--paper) 58%, transparent);
+  }
+  .daytabs-wrap.can-prev .daytabs-nav.prev,
+  .daytabs-wrap.can-next .daytabs-nav.next{ display:flex; }
 
   .mappanel{
     position:sticky;
-    /* clears the pinned strip (its bottom lands at 64px) + the same 16px of
+    /* clears the pinned strip (its bottom lands at 56px) + the same 16px of
        air the map used to keep from the top of the window */
-    top:80px;
+    top:72px;
     align-self:start;
-    max-height:calc(100vh - 104px);
+    max-height:calc(100vh - 96px);
   }
   #map{ min-height:420px; }
 }
@@ -1075,13 +1118,18 @@ h1.title:hover{color:var(--accent-dark);}
 
   /* The day strip pins under the top action bar, so the current day (and its
      date) stays readable while the schedule scrolls. Full-bleed background
-     covers content sliding beneath. */
-  .daytabs{
-    scroll-snap-type:x proximity;
+     covers content sliding beneath. The pin lives on the wrapper, not on the
+     strip: a sticky element can never outrun its own parent's box, and the
+     wrapper is exactly as tall as the strip. */
+  .daytabs-wrap{
     position:sticky; top:57px; z-index:45;
     background:var(--paper);
     margin:0 -14px;
     padding:6px 14px 0;
+  }
+  .daytabs{
+    scroll-snap-type:x proximity;
+    padding:0;
     gap:5px;
   }
   /* Narrower cap than desktop so two or three days are always in view —
@@ -1450,6 +1498,7 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .check-add input:focus{ border-style:solid; border-color:var(--ink-soft); outline:none; }
 .check-add .reset-btn{ flex:none; }
+.check-add .check-add-head{ color:var(--ink-soft); }
 .check-list{ display:flex; flex-direction:column; }
 .check-row{
   display:flex; align-items:center; gap:10px;
@@ -1458,6 +1507,38 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .check-row:last-child{ border-bottom:none; }
 .check-tick{ width:19px; height:19px; flex:none; margin:0; accent-color:var(--accent); cursor:pointer; }
+
+/* Reorder grip — quiet until the row is hovered, like the stop cards' handle.
+   It stays visible on touch, where there's no hover to reveal it. */
+.check-grip{
+  flex:none; cursor:grab;
+  color:var(--line); font-size:13px; line-height:1;
+  padding:2px; border-radius:5px;
+  touch-action:none;
+  transition:color .15s;
+}
+.check-row:hover .check-grip{ color:var(--ink-soft); }
+.check-grip:focus-visible{ outline:1px solid var(--ink-soft); outline-offset:1px; color:var(--ink-soft); }
+.check-row.dragging, .check-row.touch-dragging{ opacity:.4; }
+/* the list runs down the card, so the drop marker sits on a horizontal edge */
+.check-row.drop-before{ box-shadow: inset 0 3px 0 var(--gold); }
+.check-row.drop-after{ box-shadow: inset 0 -3px 0 var(--gold); }
+
+/* Section heading: a labelled divider, sized like the card's own sub-labels.
+   No tick box — the row it replaces holds nothing to do, only a name for the
+   rows under it. The tick column is empty, so its text lines up with theirs. */
+.check-row.check-head{
+  border-bottom:none;
+  padding:14px 4px 4px;
+}
+.check-row.check-head:first-child{ padding-top:4px; }
+.check-row.check-head .check-text,
+.check-row.check-head .check-edit{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px; text-transform:uppercase; letter-spacing:0.07em;
+  color:var(--ink-soft);
+  margin-left:25px;                 /* tick (19) + gap (10) − the text's own 4px bleed */
+}
 .check-text{
   flex:1; min-width:0;
   font-size:14px; color:var(--ink); line-height:1.4; overflow-wrap:anywhere;
@@ -1802,16 +1883,20 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .info-notes .infocard{ margin:0 0 12px; }
   .info-notes .infocard:last-child{ margin-bottom:0; }
   .infocard{ padding:14px 14px 16px; }
-  /* Input and Add stay on one line — a full-width button below the field
-     wasted a whole row. */
-  .check-add{ flex-wrap:nowrap; }
-  .check-add input{ flex:1 1 auto; min-width:0; min-height:44px; }
-  .check-add .reset-btn{ flex:0 0 auto; min-height:44px; padding:8px 14px; }
+  /* The field gets the top line to itself — squeezed between two buttons it
+     was down to a couple of words — and Add / Section split the line below. */
+  .check-add{ flex-wrap:wrap; }
+  .check-add input{ flex:1 1 100%; min-width:0; min-height:44px; }
+  .check-add .reset-btn{ flex:1 1 0; min-width:0; min-height:44px; padding:8px 14px; }
   .check-row{ padding:11px 2px; }
   .check-tick{ width:23px; height:23px; }
   /* Room for a thumb on the text without the tap target shrinking the row. */
   .check-text{ padding:6px 4px; margin:-6px -4px; }
   .check-del{ min-width:44px; min-height:44px; font-size:16px; }
+  /* Press-and-drag needs a target of its own, and no hover to reveal it. */
+  .check-grip{ min-width:30px; min-height:44px; display:flex; align-items:center;
+               justify-content:center; color:var(--ink-soft); font-size:15px; }
+  .check-row.check-head .check-text{ margin-left:29px; }   /* tick (23) + gap (10) − 4px bleed */
   .ic-edit{ min-height:32px; padding:6px 12px; }
 
   /* Google Maps picker as a bottom sheet: touch-sized rows, the count on its
@@ -1831,7 +1916,8 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
    query, which would otherwise stamp the fixed tab bar over every page. */
 @media print{
   .toplinks, .tl-views, #more-sheet{ display:none !important; }
-  /* pinned chrome has no meaning on paper — let both sit where they fall */
-  .daytabs, .mappanel{ position:static; }
+  /* pinned chrome has no meaning on paper — let it all sit where it falls */
+  .daytabs-wrap, .daytabs, .mappanel{ position:static; }
+  .daytabs-nav{ display:none !important; }
   .wrap{ padding-bottom:0; }
 }

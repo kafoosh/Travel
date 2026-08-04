@@ -66,6 +66,19 @@ check('checklist survives with done state', (() => {
     && t.checklist[0].text === 'Book Borghese: timed entry' && t.checklist[0].done === false
     && t.checklist[1].text === 'Renew passport' && t.checklist[1].done === true;
 })());
+check('checklist section headings survive, in place', (() => {
+  trip.checklist = [
+    { id:'k1', text:'Before we go', type:'header', done:false },
+    { id:'k2', text:'Renew passport', done:true },
+    { id:'k3', text:'Pack', type:'header', done:false },
+    { id:'k4', text:'Walking shoes', done:false },
+  ];
+  const t = parseTrip(serializeTrip(trip)).trip;
+  return t.checklist.length === 4
+    && t.checklist.map(c => c.type || 'item').join(',') === 'header,item,header,item'
+    && t.checklist[0].text === 'Before we go' && t.checklist[2].text === 'Pack'
+    && t.checklist[1].done === true && t.checklist[3].done === false;
+})());
 check('checklist trip is still a fixed point', (() => {
   const t = parseTrip(serializeTrip(trip)).trip;
   return JSON.stringify(t) === JSON.stringify(parseTrip(serializeTrip(t)).trip);
@@ -267,6 +280,16 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       check('hostile stop text cannot break out', !html.includes('<script>alert(1)') && !html.includes('<img src=x')
         && !html.includes('</textarea><script>') && !html.includes('<b>stop</b>'));
       check('file name is derived from the trip', offlineFileName(ot) === 'rome-venice-offline.html');
+      check('checklist headings travel as headings, not as tickable rows', (() => {
+        const ct = parseTrip(md).trip;
+        ct.checklist = [
+          { id:'k1', text:'Before we go', type:'header', done:false },
+          { id:'k2', text:'Renew passport', done:false },
+        ];
+        const h = buildOfflineHtml(ct, { generatedAt: new Date('2026-01-01') });
+        return h.includes('<p class="check-sec">Before we go</p>')
+          && !h.includes('data-check="k1"') && h.includes('data-check="k2"');
+      })());
       check('photos are only counted once', photoUrls(ot).length === new Set(photoUrls(ot)).size);
 
       // The trip file travels inside the page, so a phone can hand the plan

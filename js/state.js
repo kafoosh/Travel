@@ -78,6 +78,8 @@ export function normalizeTrip(t){
       let id = typeof c.id === 'string' && c.id ? c.id : 'k' + (i + 1);
       while(seenIds.has(id)) id = 'k' + (i + 1) + '-' + seenIds.size;
       seenIds.add(id);
+      // A heading is a divider between items: nothing to tick, so never done.
+      if(c.type === 'header') return { id, text: c.text.trim(), type:'header', done:false };
       return { id, text: c.text.trim(), done: !!c.done };
     });
   trip.stops = t.stops || {};
