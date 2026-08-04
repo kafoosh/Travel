@@ -1994,7 +1994,9 @@ const INFO_CARDS = [
 ];
 
 /* The open half of the checklist. Ticking an item doesn't delete it — it
-   moves to the Bin's completed section, where it can be brought back. */
+   moves to the Bin's completed section, where it can be brought back.
+   Only the box ticks: clicking the text opens it for editing instead, so a
+   mis-aimed click reworded an item rather than filing it away. */
 function renderChecklist(){
   const el = $('check-list');
   if(!el) return;
@@ -2008,18 +2010,56 @@ function renderChecklist(){
     const row = document.createElement('div');
     row.className = 'check-row';
     row.innerHTML = `
-      <label class="check-box">
-        <input type="checkbox" aria-label="Mark done: ${esc(item.text)}">
-        <span class="check-text">${esc(item.text)}</span>
-      </label>
+      <input type="checkbox" class="check-tick" aria-label="Mark done: ${esc(item.text)}">
+      <span class="check-text" role="button" tabindex="0" title="Click to edit">${esc(item.text)}</span>
       <button type="button" class="check-del" title="Delete this item">✕</button>`;
-    row.querySelector('input').addEventListener('change', () => {
+    row.querySelector('.check-tick').addEventListener('change', () => {
       pushUndo();
       item.done = true;
       saveState();
       renderInfo();
       updateUndoButton();
     });
+
+    /* Swap the text for an input in place. Saving on blur keeps Enter, a
+       click elsewhere and a tab-away all doing the same thing; Escape backs
+       out, and blanking the text is treated as "leave it alone" so an
+       accidental select-all-delete can't silently empty a row. */
+    const text = row.querySelector('.check-text');
+    const startEdit = () => {
+      if(row.querySelector('.check-edit')) return;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'check-edit';
+      input.value = item.text;
+      input.setAttribute('aria-label', 'Edit item: ' + item.text);
+      let cancelled = false;
+      const stopEdit = () => {
+        const val = input.value.trim();
+        if(!cancelled && val && val !== item.text){
+          pushUndo();
+          item.text = val;
+          saveState();
+          renderInfo();
+          updateUndoButton();
+          return;          // renderInfo rebuilds the row for us
+        }
+        input.replaceWith(text);
+      };
+      input.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter'){ e.preventDefault(); input.blur(); }
+        else if(e.key === 'Escape'){ e.preventDefault(); cancelled = true; input.blur(); }
+      });
+      input.addEventListener('blur', stopEdit);
+      text.replaceWith(input);
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
+    text.addEventListener('click', startEdit);
+    text.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); startEdit(); }
+    });
+
     row.querySelector('.check-del').addEventListener('click', () => {
       pushUndo();
       trip().checklist = trip().checklist.filter(c => c.id !== item.id);
