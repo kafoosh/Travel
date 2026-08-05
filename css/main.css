@@ -1365,13 +1365,12 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   .view-switch button.active{ background:var(--ink); color:var(--paper-card); border-color:var(--ink); }
   .daypanel-body.show-map .schedule{ display:none; }
   .daypanel-body.show-list .mappanel{ display:none; }
-  #map{ min-height:60vh; min-height:62dvh; }
+  /* #map, .stop-name, .stop-desc and .stop-controls live in the MOBILE
+     LAST-WORD block at the END of this file — their base rules sit later
+     than this block, so declared here they lose the tie and never apply. */
 
   .stop-card{ padding:12px 10px; gap:10px; align-items:flex-start; }
   .stop-illustration{ width:46px; height:46px; font-size:19px; }
-  .stop-name{ font-size:16px; }
-  .stop-desc{ font-size:13.5px; }
-  .stop-controls{ gap:6px; }
   .stop-controls .drag-handle{ font-size:22px; width:44px; min-height:44px; }
   .stop-number{ width:26px; height:26px; font-size:12.5px; }
 
@@ -1393,15 +1392,9 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   /* Trip Info / checklist mobile rules live in the LAST-WORD block at the end
      of this file — their base rules sit later than this block. */
 
-  .modal-overlay{ padding:0; align-items:flex-end; }
-  /* overscroll-behavior stops the sheet's scroll chaining into the page
-     (the iOS rubber-band behind an open sheet); dvh tracks the real
-     viewport under Safari's collapsing toolbars. */
-  .modal-overlay, .modal-box{ overscroll-behavior:contain; }
-  .modal-box{ max-height:92vh; max-height:92dvh; border-radius:16px 16px 0 0; }
-  .modal-photo{ height:200px; border-radius:16px 16px 0 0; }
-  .modal-content{ padding:18px 18px max(30px, calc(18px + env(safe-area-inset-bottom))); }
-  .modal-title{ font-size:22px; }
+  /* The bottom-sheet rules for .modal-overlay / -box / -photo / -content /
+     -title live in the MOBILE LAST-WORD block at the END of this file, for
+     the same reason: every one of their base rules sits later than this. */
   /* Four one-word actions share the row evenly, so they stay on one line even
      on the narrowest phone rather than wrapping into a second row. */
   #modal-overlay .modal-actions{ gap:6px; flex-wrap:nowrap; }
@@ -1441,7 +1434,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   .al-coords{ grid-template-columns:1fr; }
   .map-legend{ gap:8px; font-size:10.5px; }
   .daypanel-head h2{ font-size:19px; }
-  .stop-desc{ font-size:13px; }
+  /* .stop-desc's narrow-phone size is in the LAST-WORD block at the end. */
 }
 
 .stop-main{flex:1;min-width:0;}
@@ -2121,6 +2114,35 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .gmaps-list{ max-height:none; }
   #gmaps-overlay .modal-actions{ margin-top:12px; }
   #gmaps-open{ width:100%; min-height:48px; font-size:13px; }
+
+  /* Modals as bottom sheets. A phone has no room for a box floating in the
+     middle of a dimmed screen: the sheet takes the full width, anchors to the
+     bottom edge where a thumb is, and squares off its lower corners against
+     it. The photo and the type step down to match the narrower column.
+     overscroll-behavior stops the sheet's scroll chaining into the page (the
+     iOS rubber-band behind an open sheet); dvh tracks the real viewport under
+     Safari's collapsing toolbars. */
+  .modal-overlay{ padding:0; align-items:flex-end; }
+  .modal-overlay, .modal-box{ overscroll-behavior:contain; }
+  .modal-box{ max-height:92vh; max-height:92dvh; border-radius:16px 16px 0 0; }
+  .modal-photo{ height:200px; border-radius:16px 16px 0 0; }
+  .modal-content{ padding:18px 18px max(30px, calc(18px + env(safe-area-inset-bottom))); }
+  .modal-title{ font-size:22px; }
+
+  /* The map pane is a view of its own on a phone, reached by its own switch —
+     so it takes the screen rather than the desktop layout's fixed 360px. */
+  #map{ min-height:60vh; min-height:62dvh; }
+
+  /* Card typography and the breathing room between a card's controls. */
+  .stop-name{ font-size:16px; }
+  .stop-desc{ font-size:13.5px; }
+  .stop-controls{ gap:6px; }
+}
+
+/* Narrow phones, same last-word reasoning — must stay after the block above
+   so it wins the tie with it, as the mid-file 560px block does with 860px. */
+@media (max-width: 560px){
+  .stop-desc{ font-size:13px; }
 }
 
 /* Paper gets no navigation chrome: A4/Letter page widths match the ≤860px
