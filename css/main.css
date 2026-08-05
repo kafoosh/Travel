@@ -191,13 +191,17 @@ h1.title:hover{color:var(--accent-dark);}
   max-width:560px;
   margin:0 auto;
 }
-.hero-hotels{
+/* The chips lay themselves out in .hh-list, not in the wrapper, so the mobile
+   block below can fold the list away behind .hh-summary without unpicking
+   this. On desktop there's no fold: the summary line is simply not rendered. */
+.hero-hotels{ margin-top:20px; }
+.hh-list{
   display:flex;
   gap:14px;
   justify-content:center;
   flex-wrap:wrap;
-  margin-top:20px;
 }
+.hh-summary{ display:none; }
 .hotel-chip{
   display:flex;
   align-items:center;
@@ -212,6 +216,38 @@ h1.title:hover{color:var(--accent-dark);}
   overflow-wrap:anywhere;
 }
 .hotel-chip .dot{width:9px;height:9px;border-radius:50%;flex:none;background:var(--accent);}
+
+/* ---------- Shared-trip loading gate ----------
+   Up only while a share link's trip is still in flight and this browser has
+   no cached copy of it (see app.js). The header stays exactly as it is —
+   the title is simply still empty, because nothing has rendered into it —
+   and one quiet line sits where the day panel will be. The nav dims and
+   stops taking clicks for the duration, so a tab pressed now can't land on
+   a view that hasn't been drawn yet. */
+#trip-loading{ display:none; }
+html.trip-loading #trip-loading{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  min-height:40vh;
+  color:var(--ink-soft);
+  font-family:'IBM Plex Mono', monospace;
+  font-size:13px;
+  letter-spacing:0.04em;
+}
+html.trip-loading .wrap > section,
+html.trip-loading .wrap > footer{ display:none; }
+html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
+#trip-loading .spin{
+  display:inline-block;
+  font-size:15px;
+  animation:trip-loading-spin 1.1s linear infinite;
+}
+@keyframes trip-loading-spin{ to{ transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce){
+  #trip-loading .spin{ animation:none; }
+}
 
 /* ---------- Top nav ----------
    Desktop: one centred row — the six view tabs, then a dashed divider and a
@@ -1111,6 +1147,9 @@ h1.title:hover{color:var(--accent-dark);}
     width:100%;
     margin-left:0; padding-left:0; border-left:none;
   }
+  /* Starting a new trip moves to the More sheet on mobile — the slim top bar
+     is icon-only real estate already spoken for. */
+  #btn-new-trip{ display:none; }
   #btn-settings{ margin-right:auto; }
   .toplinks button{ min-height:44px; padding:8px 13px; }
   /* Sync chip: glyph only at 44px — the full text lives in its title and in
@@ -1186,6 +1225,12 @@ h1.title:hover{color:var(--accent-dark);}
     color:var(--ink); text-align:left; cursor:pointer;
   }
   .sheet-panel button:active{ background:var(--accent-tint); }
+  /* Not a view like the rows above it — set apart with a rule of its own. */
+  .sheet-panel .sheet-divider{
+    margin-top:6px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+  }
   html[data-view="optional"] #mnav-optional,
   html[data-view="bin"] #mnav-bin,
   html[data-view="ai"] #mnav-ai{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; }
@@ -1202,8 +1247,22 @@ h1.title:hover{color:var(--accent-dark);}
   header.hero{ padding:18px 14px 4px; }
   h1.title{ margin:4px 0 4px; }
   .hero-sub{ font-size:13px; line-height:1.45; }
-  .hero-hotels{ gap:6px; margin-top:14px; }
   .hotel-chip{ font-size:12px; padding:7px 12px; }
+
+  /* Hotels rest as one quiet line under the title and unfold on tap: which
+     hotels the trip books doesn't earn the top of a phone screen, but it
+     shouldn't cost a trip to Trip Info to see either. */
+  .hero-hotels{ margin-top:10px; }
+  .hh-summary{
+    display:inline-flex; align-items:center; gap:6px;
+    min-height:32px; padding:2px 8px;
+    background:none; border:none;
+    font-family:'IBM Plex Mono', monospace; font-size:12px;
+    color:var(--ink-soft); cursor:pointer;
+  }
+  .hero-hotels.open .hs-caret{ transform:rotate(180deg); }
+  .hh-list{ display:none; gap:6px; }
+  .hero-hotels.open .hh-list{ display:flex; margin-top:8px; }
 
   /* The day strip pins under the top action bar, so the current day (and its
      date) stays readable while the schedule scrolls. Full-bleed background
@@ -1351,7 +1410,7 @@ h1.title:hover{color:var(--accent-dark);}
 
 @media (max-width: 560px){
   h1.title{ font-size:clamp(28px, 9vw, 40px); }
-  .hero-hotels{ flex-direction:column; align-items:stretch; }
+  .hh-list{ flex-direction:column; align-items:stretch; }
   .hotel-chip{ justify-content:flex-start; border-radius:12px; text-align:left; font-size:12px; }
   .al-coords{ grid-template-columns:1fr; }
   .map-legend{ gap:8px; font-size:10.5px; }

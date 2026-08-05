@@ -40,16 +40,35 @@ export const state = {
   undoStack: [],
 };
 
+/* "New trip" (js/ui.js) opens a second, same-origin tab — and browsers clone
+   sessionStorage into a same-origin tab opened by script, draft and all, even
+   with noopener set. A "?newTrip=1" marker on that URL is the escape hatch:
+   caught here before anything reads the inherited draft, it wipes the clone
+   and leaves state.trip at its default blankTrip(). The URL is cleaned up
+   immediately after, so this only ever fires once, and a later reload of the
+   same tab takes the normal path. */
+function consumeNewTripFlag(){
+  if(!/(?:^|[?&])newTrip=1(?:&|$)/.test(location.search)) return false;
+  try{ sessionStorage.removeItem(DRAFT_KEY); } catch(e){}
+  history.replaceState(null, '', location.origin + location.pathname + location.hash);
+  return true;
+}
+
+/* Returns whether a stored trip was actually restored. A share link opened
+   where the answer is `false` has nothing to show until the room arrives —
+   app.js holds the first render rather than paint a blank trip meanwhile. */
 export function loadState(){
   try{ localStorage.removeItem('travelPlanner_v1'); } catch(e){}   // pre-share-model key
+  if(consumeNewTripFlag()) return false;
   try{
     const code = currentRoomCode();
     const raw = code ? localStorage.getItem(ROOM_PREFIX + code) : sessionStorage.getItem(DRAFT_KEY);
     if(raw){
       const saved = JSON.parse(raw);
-      if(isValidTrip(saved.trip)) state.trip = normalizeTrip(saved.trip);
+      if(isValidTrip(saved.trip)){ state.trip = normalizeTrip(saved.trip); return true; }
     }
   } catch(e){ console.warn('Could not load saved trip', e); }
+  return false;
 }
 
 /* Fill any holes in a trip object that came from storage, an import,

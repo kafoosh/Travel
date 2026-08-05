@@ -6,6 +6,12 @@
 <title>Travel Planner</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Opening a share link runs three round-trips in sequence before the trip
+     can be drawn — the Firebase SDK modules, anonymous sign-in, then the
+     first snapshot. Warming the handshakes shortens all three. -->
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css" />
 <link rel="stylesheet" href="css/main.css" />
@@ -41,6 +47,7 @@
     <button id="btn-more" aria-expanded="false" aria-controls="more-sheet" title="More"><span class="ico" aria-hidden="true">⋯</span><span class="lbl-s">More</span></button>
   </nav>
   <div class="tl-actions">
+    <button id="btn-new-trip" title="Open a blank trip in a new tab — this one stays exactly as it is">✚ New trip</button>
     <button id="btn-settings" title="Trip settings"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Settings</span></button>
     <button id="undo-btn" title="Undo last change" disabled><span class="ico" aria-hidden="true">↺</span><span class="lbl">Undo</span></button>
     <button id="save-share-btn" title="Save this trip to the cloud and get a shareable link">💾 Save</button>
@@ -56,10 +63,20 @@
     <button id="mnav-optional">🎒 Unassigned</button>
     <button id="mnav-bin">🗑 Bin</button>
     <button id="mnav-ai">✨ AI Plan</button>
+    <button id="mnav-new-trip" class="sheet-divider" title="Open a blank trip in a new tab — this one stays exactly as it is">✚ New trip</button>
   </div>
 </div>
 
 <div class="wrap">
+
+  <!-- Stands in for the itinerary while a share link's trip is still coming
+       down from Firestore (see app.js). Without it the page would spend that
+       time showing a blank "Untitled Trip", which reads as a broken link
+       rather than as loading. -->
+  <div id="trip-loading" role="status" aria-live="polite">
+    <span class="spin" aria-hidden="true">◌</span>
+    <span>Opening the shared trip…</span>
+  </div>
 
   <section id="view-days">
     <!-- The strip scrolls sideways when a trip outgrows the row. The native

@@ -33,11 +33,15 @@ let onRemoteTrip = null;     // callback(trip)
 let onStatus = null;         // callback() — read cloud.* for details
 let getTrip = null;          // () => current trip object
 
-export const cloud = { room: null, status: 'local', error: null, lastSync: null, note: null, configured: !!FIREBASE_CONFIG };
+/* `arriving` separates the two ways a room reaches 'connecting': opening one
+   that already exists (a share link) from creating one (the Save button).
+   They look identical in `status`, but they want opposite words on screen. */
+export const cloud = { room: null, status: 'local', error: null, lastSync: null, note: null, arriving: false, configured: !!FIREBASE_CONFIG };
 
 function setStatus(status, error){
   cloud.status = status;
   cloud.error = error || null;
+  if(status !== 'connecting') cloud.arriving = false;
   if(status === 'synced') cloud.lastSync = Date.now();
   if(onStatus) onStatus();
 }
@@ -121,6 +125,7 @@ export async function joinRoom(code, opts = {}){
   const expectNew = !!opts.expectNew;   // true only for a room this client just created
   detach();
   cloud.room = code;
+  cloud.arriving = !expectNew;
   hydrated = expectNew;
   setStatus('connecting');
   try{

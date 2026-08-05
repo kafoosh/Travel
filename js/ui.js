@@ -83,16 +83,45 @@ export function applyTheme(){
   document.documentElement.dataset.theme = t;
 }
 
+/* The shared-trip loading gate (driven from app.js). One root class: the CSS
+   hides the itinerary sections, dims the nav and shows the "Opening…" line.
+   Nothing has rendered into the hero yet at that point, so the title is
+   blank rather than reading "Untitled Trip". */
+export function setTripLoading(on){
+  document.documentElement.classList.toggle('trip-loading', !!on);
+}
+
 function renderHero(){
   $('trip-title').textContent = trip().name || 'Untitled Trip';
   const sub = $('trip-subtitle');
   sub.textContent = trip().subtitle || '';
   sub.classList.toggle('hidden', !trip().subtitle);
-  const hh = $('hero-hotels');
-  hh.innerHTML = trip().hotels.map(h =>
-    `<div class="hotel-chip"><span class="dot"></span> ${esc(h.name)}${h.mode === 'boat' ? ' · boat shuttle' : ''}</div>`
-  ).join('');
+  renderHeroHotels();
   document.title = (trip().name && trip().name !== 'Untitled Trip') ? trip().name + ' — Travel Planner' : 'Travel Planner';
+}
+
+/* The trip's hotels, under the title. On a phone they rest as one quiet line
+   and unfold on tap — the same fold the day panel's "Staying at" bar uses.
+   Which hotels a trip books is worth having, but it isn't worth the top of
+   every screen: the day actually on screen names its own hotel anyway. */
+function renderHeroHotels(){
+  const el = $('hero-hotels');
+  const hotels = trip().hotels;
+  el.classList.remove('open');
+  if(!hotels.length){ el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <button type="button" class="hh-summary" id="hero-hotels-summary" aria-expanded="false" aria-controls="hero-hotels-list">
+      <span>🏨 ${hotels.length} hotel${hotels.length === 1 ? '' : 's'}</span>
+      <span class="hs-caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="hh-list" id="hero-hotels-list">${hotels.map(h =>
+      `<div class="hotel-chip"><span class="dot"></span> ${esc(h.name)}${h.mode === 'boat' ? ' · boat shuttle' : ''}</div>`
+    ).join('')}</div>`;
+  const btn = $('hero-hotels-summary');
+  btn.addEventListener('click', () => {
+    const open = el.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 /* =========================================================
@@ -2975,7 +3004,8 @@ export function renderCloudUI(){
   const ss = $('save-share-btn');
   if(ss){
     if(cloud.room){
-      ss.textContent = cloud.status === 'connecting' ? '◌ Saving…' : '🔗 Share';
+      ss.textContent = cloud.status !== 'connecting' ? '🔗 Share'
+        : cloud.arriving ? '◌ Opening…' : '◌ Saving…';
       ss.title = 'Copy the shareable link to this trip';
     } else {
       ss.textContent = '💾 Save';
@@ -3133,6 +3163,19 @@ function submitSettings(e){
   renderInfo();
 }
 
+/* The top-nav "New trip" action. Unlike Clear trip (Settings) or Empty this
+   room (Trip Info), it never touches the trip the user is currently in —
+   shared or an unsaved draft, this tab keeps it exactly as it is. It opens a
+   second tab at the bare URL plus a one-shot marker (see loadState in
+   state.js) that forces that tab to start blank rather than inherit this
+   tab's sessionStorage draft, which browsers otherwise clone into a
+   same-origin new tab. No confirmation needed — nothing here is discarded. */
+function startNewTrip(){
+  const url = location.origin + location.pathname + '?newTrip=1';
+  const opened = window.open(url, '_blank', 'noopener');
+  if(!opened) alert('Your browser blocked the new tab — allow pop-ups for this site and try again.');
+}
+
 function clearTrip(){
   const shared = cloud.room
     ? '\n\nThis trip is shared: the blank trip syncs to the link too, so everyone on it loses the itinerary. To keep the shared copy, use "Stop syncing" (Trip Info) first.'
@@ -3235,6 +3278,7 @@ export function wireStaticHandlers(){
   on('more-backdrop', 'click', () => setMore(false));
   [['mnav-optional','optional'], ['mnav-bin','bin'], ['mnav-ai','ai']].forEach(([id, view]) =>
     on(id, 'click', () => { setMore(false); setView(view); }));
+  on('mnav-new-trip', 'click', () => { setMore(false); startNewTrip(); });
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape' || !moreSheet || moreSheet.hidden) return;
     // An overlay stacked above the sheet owns this Escape — close layers one at a time.
@@ -3278,6 +3322,7 @@ export function wireStaticHandlers(){
   on('al-cat', 'change', refreshEndPointFields);
   on('al-lat', 'input', refreshCoordsStatus);
   on('al-lng', 'input', refreshCoordsStatus);
+  on('btn-new-trip', 'click', startNewTrip);
   on('btn-settings', 'click', openSettings);
   on('trip-title', 'click', openSettings);
   on('cloud-chip', 'click', () => setView('info'));
