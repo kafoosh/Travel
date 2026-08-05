@@ -191,13 +191,17 @@ h1.title:hover{color:var(--accent-dark);}
   max-width:560px;
   margin:0 auto;
 }
-.hero-hotels{
+/* The chips lay themselves out in .hh-list, not in the wrapper, so the mobile
+   block below can fold the list away behind .hh-summary without unpicking
+   this. On desktop there's no fold: the summary line is simply not rendered. */
+.hero-hotels{ margin-top:20px; }
+.hh-list{
   display:flex;
   gap:14px;
   justify-content:center;
   flex-wrap:wrap;
-  margin-top:20px;
 }
+.hh-summary{ display:none; }
 .hotel-chip{
   display:flex;
   align-items:center;
@@ -1243,8 +1247,22 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   header.hero{ padding:18px 14px 4px; }
   h1.title{ margin:4px 0 4px; }
   .hero-sub{ font-size:13px; line-height:1.45; }
-  .hero-hotels{ gap:6px; margin-top:14px; }
   .hotel-chip{ font-size:12px; padding:7px 12px; }
+
+  /* Hotels rest as one quiet line under the title and unfold on tap: which
+     hotels the trip books doesn't earn the top of a phone screen, but it
+     shouldn't cost a trip to Trip Info to see either. */
+  .hero-hotels{ margin-top:10px; }
+  .hh-summary{
+    display:inline-flex; align-items:center; gap:6px;
+    min-height:32px; padding:2px 8px;
+    background:none; border:none;
+    font-family:'IBM Plex Mono', monospace; font-size:12px;
+    color:var(--ink-soft); cursor:pointer;
+  }
+  .hero-hotels.open .hs-caret{ transform:rotate(180deg); }
+  .hh-list{ display:none; gap:6px; }
+  .hero-hotels.open .hh-list{ display:flex; margin-top:8px; }
 
   /* The day strip pins under the top action bar, so the current day (and its
      date) stays readable while the schedule scrolls. Full-bleed background
@@ -1392,7 +1410,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 
 @media (max-width: 560px){
   h1.title{ font-size:clamp(28px, 9vw, 40px); }
-  .hero-hotels{ flex-direction:column; align-items:stretch; }
+  .hh-list{ flex-direction:column; align-items:stretch; }
   .hotel-chip{ justify-content:flex-start; border-radius:12px; text-align:left; font-size:12px; }
   .al-coords{ grid-template-columns:1fr; }
   .map-legend{ gap:8px; font-size:10.5px; }

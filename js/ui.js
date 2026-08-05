@@ -96,11 +96,32 @@ function renderHero(){
   const sub = $('trip-subtitle');
   sub.textContent = trip().subtitle || '';
   sub.classList.toggle('hidden', !trip().subtitle);
-  const hh = $('hero-hotels');
-  hh.innerHTML = trip().hotels.map(h =>
-    `<div class="hotel-chip"><span class="dot"></span> ${esc(h.name)}${h.mode === 'boat' ? ' · boat shuttle' : ''}</div>`
-  ).join('');
+  renderHeroHotels();
   document.title = (trip().name && trip().name !== 'Untitled Trip') ? trip().name + ' — Travel Planner' : 'Travel Planner';
+}
+
+/* The trip's hotels, under the title. On a phone they rest as one quiet line
+   and unfold on tap — the same fold the day panel's "Staying at" bar uses.
+   Which hotels a trip books is worth having, but it isn't worth the top of
+   every screen: the day actually on screen names its own hotel anyway. */
+function renderHeroHotels(){
+  const el = $('hero-hotels');
+  const hotels = trip().hotels;
+  el.classList.remove('open');
+  if(!hotels.length){ el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <button type="button" class="hh-summary" id="hero-hotels-summary" aria-expanded="false" aria-controls="hero-hotels-list">
+      <span>🏨 ${hotels.length} hotel${hotels.length === 1 ? '' : 's'}</span>
+      <span class="hs-caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="hh-list" id="hero-hotels-list">${hotels.map(h =>
+      `<div class="hotel-chip"><span class="dot"></span> ${esc(h.name)}${h.mode === 'boat' ? ' · boat shuttle' : ''}</div>`
+    ).join('')}</div>`;
+  const btn = $('hero-hotels-summary');
+  btn.addEventListener('click', () => {
+    const open = el.classList.toggle('open');
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
 }
 
 /* =========================================================
