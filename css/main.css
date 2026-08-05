@@ -1225,11 +1225,17 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
     color:var(--ink); text-align:left; cursor:pointer;
   }
   .sheet-panel button:active{ background:var(--accent-tint); }
-  /* Not a view like the rows above it — set apart with a rule of its own. */
+  /* Not a view like the rows above it — set apart by a rule that spans the
+     sheet. Drawn as a pseudo-element bled out to the panel edges rather than
+     as the button's own border: a border stops at the row's rounded, inset
+     box, which reads as a stray line floating above the label. */
   .sheet-panel .sheet-divider{
-    margin-top:6px;
-    padding-top:14px;
-    border-top:1px solid var(--line);
+    position:relative;
+    margin-top:11px;
+  }
+  .sheet-panel .sheet-divider::before{
+    content:''; position:absolute; top:-6px; left:-12px; right:-12px;
+    height:1px; background:var(--line);
   }
   html[data-view="optional"] #mnav-optional,
   html[data-view="bin"] #mnav-bin,
@@ -1391,6 +1397,13 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   .modal-photo{ height:200px; border-radius:16px 16px 0 0; }
   .modal-content{ padding:18px 18px max(30px, calc(18px + env(safe-area-inset-bottom))); }
   .modal-title{ font-size:22px; }
+  /* Four one-word actions share the row evenly, so they stay on one line even
+     on the narrowest phone rather than wrapping into a second row. */
+  #modal-overlay .modal-actions{ gap:6px; flex-wrap:nowrap; }
+  #modal-overlay .modal-actions .reset-btn{
+    flex:1 1 0; min-width:0; padding:8px 4px;
+    justify-content:center; gap:5px;
+  }
   /* .modal-overlay prefix: the base .modal-close rule sits later in this
      file, so a bare .modal-close here would lose the cascade tie. No top
      inset: the sheet is bottom-anchored and never reaches the notch. */
@@ -1918,6 +1931,9 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
 }
 .modal-notes:focus{border-style:solid; border-color:var(--ink-soft); outline:none;}
 .modal-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;}
+/* The stop detail modal's actions sit above the description instead of after
+   it, so they carry a bottom margin rather than a top one. */
+#modal-overlay .modal-actions{margin:0 0 16px;}
 
 /* ---------- Google Maps route picker ---------- */
 /* The box is a flex column so a long day scrolls INSIDE the list: the
