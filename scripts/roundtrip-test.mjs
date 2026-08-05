@@ -10,6 +10,7 @@ globalThis.localStorage = {
 };
 
 const { parseTrip, serializeTrip, parseCsv, importText, blankTrip } = await import('../js/format.js');
+const { normalizeTrip } = await import('../js/state.js');
 const { optimizeDayOrder, autoPlanOrders } = await import('../js/optimize.js');
 const { readFileSync } = await import('node:fs');
 const { dirname, join } = await import('node:path');
@@ -33,7 +34,9 @@ check('68 scheduled stops', trip.days.reduce((n, d) => n + d.order.length, 0) ==
 check('11 optional', trip.optional.length === 11);
 check('3 hotels', trip.hotels.length === 3);
 check('no warnings on demo', warnings.length === 0, warnings.join('; '));
-check('day 2 uses hotel h1', trip.days[1].hotelId === 'h1');
+check('day 2 starts and ends at hotel h1', trip.days[1].startHotelId === 'h1' && trip.days[1].endHotelId === 'h1');
+check('arrival day: no start hotel, ends at h1', trip.days[0].startHotelId === null && trip.days[0].endHotelId === 'h1');
+check('hotel-change day: ends at the Venice hotel', trip.days[5].startHotelId === null && trip.days[5].endHotelId === 'h2');
 check('boat hotel preserved', trip.hotels.find(h => h.name.includes('JW')).mode === 'boat');
 const colosseum = Object.values(trip.stops).find(s => s.name === 'Colosseum');
 check('Colosseum fields', colosseum && colosseum.dur === 105 && colosseum.cat === 'landmark' && colosseum.tags.length === 1);
@@ -42,8 +45,8 @@ check('trip info sections', ['weather','closures','reservations','events','notes
 /* --- 2. notes + new fields survive a round-trip --- */
 colosseum.notes = 'Booked 09:20 entry\nRef ABC-123';
 colosseum.fixedStart = '09:20';
-trip.days[0].hotelId = 'h1';            // arrival day: hotel at the end only
-trip.days[0].bookend = 'end';
+trip.days[0].startHotelId = 'h2';       // hotel-change day: check out of one hotel…
+trip.days[0].endHotelId = 'h1';         // …and sleep at another
 trip.days[0].color = 'teal';            // per-day colour (palette key)
 const hikeId = 'u999';
 trip.stops[hikeId] = { id: hikeId, name: 'Sentiero degli Dei', cat: 'hike', dur: 240,
@@ -54,8 +57,27 @@ const t2 = parseTrip(serializeTrip(trip)).trip;
 const c2 = Object.values(t2.stops).find(s => s.name === 'Colosseum');
 check('multi-line notes survive', c2.notes === colosseum.notes);
 check('fixed start survives', c2.fixedStart === '09:20');
-check('day bookend survives', t2.days[0].bookend === 'end');
+check('split start/end hotels survive', t2.days[0].startHotelId === 'h2' && t2.days[0].endHotelId === 'h1');
 check('day colour survives', t2.days[0].color === 'teal');
+check('legacy "hotel bookend" files still import', (() => {
+  // What the site used to write: one hotel plus a bookend narrowing it to one end.
+  const src = serializeTrip(trip)
+    .replace('- start hotel: AC Hotel Venezia by Marriott', '- hotel: The Tribune, JdV by Hyatt')
+    .replace('- end hotel: The Tribune, JdV by Hyatt', '- hotel bookend: end');
+  const t = parseTrip(src).trip;
+  return t.days[0].startHotelId === null && t.days[0].endHotelId === 'h1';
+})());
+check('old saved trips (hotelId + bookend) migrate on load', (() => {
+  const raw = JSON.parse(JSON.stringify(parseTrip(md).trip));
+  raw.days.forEach(d => { delete d.startHotelId; delete d.endHotelId; });
+  raw.days[0].hotelId = 'h1'; raw.days[0].bookend = 'end';
+  raw.days[1].hotelId = 'h1'; raw.days[1].bookend = 'both';
+  raw.days[2].hotelId = 'h1'; raw.days[2].bookend = 'start';
+  const n = normalizeTrip(raw);
+  return n.days[0].startHotelId === null && n.days[0].endHotelId === 'h1'
+    && n.days[1].startHotelId === 'h1' && n.days[1].endHotelId === 'h1'
+    && n.days[2].startHotelId === 'h1' && n.days[2].endHotelId === null;
+})());
 check('checklist survives with done state', (() => {
   trip.checklist = [
     { id:'k1', text:'Book Borghese: timed entry', done:false },
@@ -166,7 +188,7 @@ check('same stops, reordered', opt.length === shuffled.length && [...opt].sort()
 
 import('../js/routing.js').then(({ heuristicLeg }) => {
   const pathMinutes = (order) => {
-    let mins = 0, prev = trip.hotels.find(h => h.id === day2.hotelId);
+    let mins = 0, prev = trip.hotels.find(h => h.id === day2.startHotelId);
     order.map(id => trip.stops[id]).filter(s => s.lat != null).forEach(s => {
       mins += heuristicLeg(prev, s).minutes; prev = s;
     });

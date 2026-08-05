@@ -57,7 +57,12 @@ One markdown file. The full spec is embedded in the AI prompt (AI Plan → "Plan
 
 ## Day 1: Arrival & Trastevere
 - start: 15:00
-- hotel: The Tribune, JdV by Hyatt   # or "none"
+- start hotel: none                  # each end of a day picks its own hotel:
+- end hotel: The Tribune, JdV by Hyatt   # an arrival day starts mid-journey, ends at the hotel
+
+## Day 2: Ancient Rome
+- start: 09:00
+- hotel: The Tribune, JdV by Hyatt   # the normal case — starts AND ends here (or "none")
 
 ### Colosseum
 - lat: 41.8902
@@ -96,7 +101,7 @@ Free text…
 …
 ```
 
-The parser is tolerant (key aliases, `-`/`*`/bare `key: value`, `1h 45m` durations, etc.). CSV import expects a header row with at least `name`; recognised columns: `name, day, lat, lng, category, duration, description, detail, image, notes, tags, done` (`day` = number or `unassigned`).
+A day names either one `hotel:` (it starts *and* ends there — the normal case) or a `start hotel:` / `end hotel:` pair when the two ends differ (arrival days start at `none`, departure days end at `none`, hotel-change days name one of each); files from before this distinction, with `hotel bookend:` lines, still import. The parser is tolerant (key aliases, `-`/`*`/bare `key: value`, `1h 45m` durations, etc.). CSV import expects a header row with at least `name`; recognised columns: `name, day, lat, lng, category, duration, description, detail, image, notes, tags, done` (`day` = number or `unassigned`).
 
 ## Enabling shared trips (one-time, free, ~5 minutes)
 

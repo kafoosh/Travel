@@ -10,7 +10,7 @@
    - autoPlanOrders: the Auto-plan feature. Assigns every
      movable stop to a day AND a position in that day's route
      in one pass, using cheapest-insertion with hard per-day
-     time budgets (visit durations + travel + hotel bookends),
+     time budgets (visit durations + travel + hotel legs),
      so "can this actually be seen that day?" is part of the
      assignment itself — not an afterthought. Seeds adapt to
      load: a day whose area is overfull pulls in an underused
@@ -24,7 +24,7 @@
 
 import { parseTime, haversineKm } from './util.js';
 import { knownMinutes } from './routing.js';
-import { getHotel } from './schedule.js';
+import { getStartHotel, getEndHotel } from './schedule.js';
 
 const DAY_END_MIN = 22 * 60 + 30;   // assume nobody plans past ~10:30pm
 const ANCHOR_CATS = ['travel', 'boat', 'hotel', 'flight'];
@@ -66,24 +66,26 @@ function twoOpt(order, cost){
 
 /* Order one day's stops. Returns a new order array (ids). */
 export function optimizeDayOrder(trip, day){
-  const hotel = getHotel(trip, day);
-  const bookend = day.bookend || 'both';
-  const boat = !!(hotel && hotel.mode === 'boat');
+  const startHotel = getStartHotel(trip, day);
+  const endHotel = getEndHotel(trip, day);
   const stops = day.order.map(id => trip.stops[id]).filter(Boolean);
   const noCoord = stops.filter(s => s.lat == null);
   const withCoord = stops.filter(s => s.lat != null);
   if(withCoord.length < 2) return day.order.slice();
 
-  const hotelUsable = hotel && hotel.lat != null;
+  const startUsable = startHotel && startHotel.lat != null;
+  const endUsable = endHotel && endHotel.lat != null;
+  const startBoat = !!(startUsable && startHotel.mode === 'boat');
+  const endBoat = !!(endUsable && endHotel.mode === 'boat');
   let anchor;
   let fixedFirst = null;
-  if(hotelUsable && bookend !== 'end'){
-    anchor = { lat: hotel.lat, lng: hotel.lng };
+  if(startUsable){
+    anchor = { lat: startHotel.lat, lng: startHotel.lng };
   } else {
     fixedFirst = withCoord.shift();      // day doesn't start at a hotel: first stop stays first
     anchor = fixedFirst;
   }
-  const endPoint = (hotelUsable && bookend !== 'start') ? { lat: hotel.lat, lng: hotel.lng } : null;
+  const endPoint = endUsable ? { lat: endHotel.lat, lng: endHotel.lng } : null;
 
   const remaining = withCoord.slice();
   const path = [];
@@ -91,7 +93,7 @@ export function optimizeDayOrder(trip, day){
   while(remaining.length){
     let bi = 0, bd = Infinity;
     remaining.forEach((s, i) => {
-      const d = legMinutes(cur, s, boat && cur === anchor);
+      const d = legMinutes(cur, s, startBoat && cur === anchor);
       if(d < bd){ bd = d; bi = i; }
     });
     const next = remaining.splice(bi, 1)[0];
@@ -103,8 +105,9 @@ export function optimizeDayOrder(trip, day){
   const cost = (i, j) => {
     const a = at(i), b = at(j);
     if(!a || !b) return 0;
-    const isHotelLeg = boat && (a === anchor || b === anchor || a === endPoint || b === endPoint);
-    return legMinutes(a, b, isHotelLeg);
+    const isBoatLeg = (startBoat && (a === anchor || b === anchor)) ||
+                      (endBoat && (a === endPoint || b === endPoint));
+    return legMinutes(a, b, isBoatLeg);
   };
   twoOpt(path, cost);
 

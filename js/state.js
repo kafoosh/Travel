@@ -58,16 +58,40 @@ export function normalizeTrip(t){
   const base = blankTrip();
   const trip = { ...base, ...t };
   trip.info = { ...base.info, ...(t.info || {}) };
-  trip.days = (t.days || []).map((d, i) => ({
-    id: i + 1, title: d.title || ('Day ' + (i + 1)), start: d.start || '09:00',
-    hotelId: d.hotelId || null,
-    bookend: ['start','end'].includes(d.bookend) ? d.bookend : 'both',
-    returnBy: ['walk','cycle','transit','taxi','boat'].includes(d.returnBy) ? d.returnBy : null,
-    color: DAY_COLORS[d.color] ? d.color : null,
-    order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
-  }));
+  trip.days = (t.days || []).map((d, i) => {
+    // A day's two hotel ends are independent: where it starts and where that
+    // night is spent. Trips saved before this model carried a single hotelId
+    // plus a bookend ('both'|'start'|'end') — migrate those on the way in.
+    let startHotelId = d.startHotelId || null, endHotelId = d.endHotelId || null;
+    if(!('startHotelId' in d) && !('endHotelId' in d) && d.hotelId){
+      const bookend = ['start','end'].includes(d.bookend) ? d.bookend : 'both';
+      startHotelId = bookend !== 'end' ? d.hotelId : null;
+      endHotelId = bookend !== 'start' ? d.hotelId : null;
+    }
+    return {
+      id: i + 1, title: d.title || ('Day ' + (i + 1)), start: d.start || '09:00',
+      startHotelId, endHotelId,
+      returnBy: ['walk','cycle','transit','taxi','boat'].includes(d.returnBy) ? d.returnBy : null,
+      color: DAY_COLORS[d.color] ? d.color : null,
+      order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
+    };
+  });
   if(!trip.days.length) trip.days = base.days;
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
+  trip.days.forEach(d => {
+    if(d.startHotelId && !trip.hotels.some(h => h.id === d.startHotelId)) d.startHotelId = null;
+    if(d.endHotelId && !trip.hotels.some(h => h.id === d.endHotelId)) d.endHotelId = null;
+    // Legacy mirror, for a shared room caught mid-deploy: a device still on
+    // the old code reads (and writes back) hotelId/bookend, so carrying them
+    // as derived fields means a round-trip through that device keeps the
+    // hotels; the migration above restores them from the mirror. On a split
+    // day the old model can only hold one hotel — keep the night's.
+    d.hotelId = d.endHotelId || d.startHotelId;
+    d.bookend = d.startHotelId === d.endHotelId ? 'both'
+      : !d.startHotelId ? 'end'
+      : !d.endHotelId ? 'start'
+      : 'end';
+  });
   trip.optional = (t.optional || []).filter(o => o && t.stops && t.stops[o.id]);
   trip.bin = (t.bin || []).filter(id => t.stops && t.stops[id]);
   // Checklist: drop empties, keep ids unique (they key DOM rows and undo).

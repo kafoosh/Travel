@@ -10,7 +10,7 @@ import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify,
 import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
          newDay, serializeTrip, importText, blankTrip } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
-import { computeSchedule, getHotel } from './schedule.js';
+import { computeSchedule } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, duplicateRoom, deleteRoom, leaveRoom, shareUrl } from './cloud.js';
@@ -271,20 +271,31 @@ function renderDayPanel(){
     // On mobile the bar rests as a one-line summary (the chips take real
     // space); tapping it unfolds the choices. Desktop shows chips directly —
     // the summary button is display:none there.
-    const current = trip().hotels.find(h => h.id === day.hotelId);
+    // A chip is the whole day's base: clicking one starts AND ends the day
+    // there. A day whose two ends differ (arrival, departure, hotel change)
+    // shows as one combined "A → B" chip; either end is changed in Edit day.
+    const startH = trip().hotels.find(h => h.id === day.startHotelId) || null;
+    const endH = trip().hotels.find(h => h.id === day.endHotelId) || null;
+    const split = (day.startHotelId || null) !== (day.endHotelId || null);
+    const summary = split
+      ? (startH ? esc(startH.name) : 'No hotel') + ' → ' + (endH ? esc(endH.name) : 'no hotel')
+      : (startH ? esc(startH.name) : 'No hotel');
     hotelBarHtml = `
     <div class="hotel-toggle" id="hotel-toggle">
       <button type="button" class="hotel-summary" id="hotel-summary" aria-expanded="false">
         <span class="hotel-toggle-label">Staying at:</span>
-        <span class="hs-name">${current ? esc(current.name) : 'No hotel'}</span>
+        <span class="hs-name">${summary}</span>
         <span class="hs-caret" aria-hidden="true">▾</span>
       </button>
       <div class="hotel-opts">
         <span class="hotel-toggle-label">Staying at:</span>
-        <button class="hotel-opt ${!day.hotelId ? 'active' : ''}" data-hotel="">No hotel</button>
+        <button class="hotel-opt ${!split && !day.startHotelId ? 'active' : ''}" data-hotel="">No hotel</button>
         ${trip().hotels.map(h =>
-          `<button class="hotel-opt ${day.hotelId === h.id ? 'active' : ''}" data-hotel="${esc(h.id)}">${esc(h.name)}</button>`
+          `<button class="hotel-opt ${!split && day.startHotelId === h.id ? 'active' : ''}" data-hotel="${esc(h.id)}" title="Start and end this day at ${esc(h.name)}">${esc(h.name)}</button>`
         ).join('')}
+        <button class="hotel-opt split-opt ${split ? 'active' : ''}" id="hotel-split-btn" title="${split
+          ? 'This day starts and ends at different places — click to change either end'
+          : 'Start and end the day at different places — an arrival, a departure, or a hotel-change day'}">${split ? summary : 'Start ≠ end…'}</button>
       </div>
     </div>`;
   }
@@ -359,15 +370,18 @@ function renderDayPanel(){
     const open = $('hotel-toggle').classList.toggle('open');
     hotelSummary.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  panel.querySelectorAll('.hotel-opt').forEach(btn => {
+  panel.querySelectorAll('.hotel-opt[data-hotel]').forEach(btn => {
     btn.addEventListener('click', () => {
       pushUndo();
-      day.hotelId = btn.dataset.hotel || null;
+      day.startHotelId = btn.dataset.hotel || null;
+      day.endHotelId = btn.dataset.hotel || null;
       saveState();
       renderDayPanel();
       updateUndoButton();
     });
   });
+  const splitBtn = $('hotel-split-btn');
+  if(splitBtn) splitBtn.addEventListener('click', () => openDayEdit(state.currentDayIndex));
 
   renderUnassignedTray($('day-unassigned'), day.id);
   renderScheduleList(day, sched);
@@ -478,7 +492,7 @@ function travelConnector(minutes, mode, live, prefixText, target){
 }
 
 function renderScheduleList(day, sched){
-  const { rows, leadTransfer, trailTransfer, returnTime, hotel } = sched;
+  const { rows, leadTransfer, trailTransfer, returnTime, startHotel, endHotel } = sched;
   const list = $('schedule-list');
   list.innerHTML = '';
 
@@ -506,10 +520,10 @@ function renderScheduleList(day, sched){
   }
 
   let mapOrder = 0;
-  if(hotel && leadTransfer){
+  if(startHotel && leadTransfer){
     const firstStop = rows.find(r => r.stop.lat != null);
     list.appendChild(travelConnector(leadTransfer.minutes, leadTransfer.mode, leadTransfer.live,
-      'Depart ' + esc(hotel.name) + ', ', firstStop ? { stopId: firstStop.stop.id } : null));
+      'Depart ' + esc(startHotel.name) + ', ', firstStop ? { stopId: firstStop.stop.id } : null));
   }
 
   rows.forEach((row, idx) => {
@@ -693,12 +707,15 @@ function renderScheduleList(day, sched){
     list.appendChild(card);
   });
 
-  if(hotel && trailTransfer){
+  if(endHotel && trailTransfer){
+    // "Return to" when it's the hotel the day started from; a different end
+    // hotel (or none at the start) means the day moves on, not back.
+    const sameHotel = startHotel && startHotel.id === endHotel.id;
     list.appendChild(travelConnector(trailTransfer.minutes, trailTransfer.mode, trailTransfer.live,
-      'Return to ' + esc(hotel.name) + ', ', { returnDay: day }));
+      (sameHotel ? 'Return to ' : 'On to ') + esc(endHotel.name) + ', ', { returnDay: day }));
     const arrive = document.createElement('div');
     arrive.className = 'travel-connector';
-    arrive.innerHTML = '🏨 Back at the hotel ~' + formatTime(returnTime);
+    arrive.innerHTML = '🏨 ' + (sameHotel ? 'Back at the hotel' : 'At ' + esc(endHotel.name)) + ' ~' + formatTime(returnTime);
     list.appendChild(arrive);
   }
 
@@ -922,21 +939,27 @@ function renderMap(day, sched){
   const pts = [];        // marker points, in visit order (drives fitBounds)
   const segs = [];       // legs between consecutive points: {from, to, path|null}
   let order = 0;
-  const hotel = sched.hotel;
+  const startHotel = (sched.startHotel && sched.startHotel.lat != null) ? sched.startHotel : null;
+  const endHotel = (sched.endHotel && sched.endHotel.lat != null) ? sched.endHotel : null;
+  const sameHotel = !!(startHotel && endHotel && startHotel.id === endHotel.id);
   let prevPt = null;
 
-  if(hotel && hotel.lat != null){
+  const hotelMarker = (h, role) => {
     const hotelIcon = L.divIcon({
       className: '',
-      html: '<div class="map-pin hotel-pin"><span>' + (hotel.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
+      html: '<div class="map-pin hotel-pin"><span>' + (h.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
       iconSize: [26,26],
       iconAnchor: [13,24]
     });
-    L.marker([hotel.lat, hotel.lng], { icon: hotelIcon }).addTo(mapLayerGroup)
-      .bindPopup('<b>' + esc(hotel.name) + '</b><br>start / end of day');
-    pts.push([hotel.lat, hotel.lng]);
-    prevPt = [hotel.lat, hotel.lng];
+    L.marker([h.lat, h.lng], { icon: hotelIcon }).addTo(mapLayerGroup)
+      .bindPopup('<b>' + esc(h.name) + '</b><br>' + role);
+  };
+  if(startHotel){
+    hotelMarker(startHotel, sameHotel ? 'start / end of day' : 'start of the day');
+    pts.push([startHotel.lat, startHotel.lng]);
+    prevPt = [startHotel.lat, startHotel.lng];
   }
+  if(endHotel && !sameHotel) hotelMarker(endHotel, 'end of the day');
 
   sched.rows.forEach(row => {
     const s = row.stop;
@@ -976,9 +999,11 @@ function renderMap(day, sched){
     }
   });
 
-  if(hotel && hotel.lat != null && pts.length > 1){
-    segs.push({ from: prevPt, to: [hotel.lat, hotel.lng], path: sched.trailTransfer ? sched.trailTransfer.path : null });
-    pts.push([hotel.lat, hotel.lng]);
+  if(endHotel && prevPt && sched.trailTransfer){
+    segs.push({ from: prevPt, to: [endHotel.lat, endHotel.lng], path: sched.trailTransfer.path });
+    pts.push([endHotel.lat, endHotel.lng]);
+  } else if(endHotel && !sameHotel){
+    pts.push([endHotel.lat, endHotel.lng]);   // no routed leg yet, but keep the pin in view
   }
 
   // Read from the panel, not the root: the panel may carry a per-day colour
@@ -1262,14 +1287,14 @@ function openDayEdit(dayIndex){
   $('de-start').value = day.start;
   deColor = DAY_COLORS[day.color] ? day.color : null;
   renderDayColorRow();
-  const sel = $('de-hotel');
-  sel.innerHTML = `<option value="">No hotel</option>` +
+  // Each end of the day picks its hotel independently — same hotel both ends
+  // is the normal day, and any other combination is just a different pick.
+  const hotelOpts = `<option value="">No hotel</option>` +
     trip().hotels.map(h => `<option value="${esc(h.id)}">${esc(h.name)}</option>`).join('');
-  sel.value = day.hotelId || '';
-  $('de-bookend').value = day.bookend || 'both';
-  const syncBookendVisibility = () => $('de-bookend-label').classList.toggle('hidden', !sel.value);
-  sel.onchange = syncBookendVisibility;
-  syncBookendVisibility();
+  $('de-start-hotel').innerHTML = hotelOpts;
+  $('de-end-hotel').innerHTML = hotelOpts;
+  $('de-start-hotel').value = day.startHotelId || '';
+  $('de-end-hotel').value = day.endHotelId || '';
   syncDayMoveButtons(dayIndex);
   $('day-edit-overlay').classList.add('open');
   document.body.style.overflow = 'hidden';
@@ -1299,8 +1324,8 @@ function submitDayEdit(e){
   pushUndo();
   day.title = $('de-title').value.trim() || day.title;
   day.start = $('de-start').value || day.start;
-  day.hotelId = $('de-hotel').value || null;
-  day.bookend = ['start','end'].includes($('de-bookend').value) ? $('de-bookend').value : 'both';
+  day.startHotelId = $('de-start-hotel').value || null;
+  day.endHotelId = $('de-end-hotel').value || null;
   day.color = DAY_COLORS[deColor] ? deColor : null;
   saveState();
   closeDayEdit();
@@ -1378,7 +1403,10 @@ function deleteHotel(hotelId){
   if(!confirm('Remove hotel "' + h.name + '"? Days using it will have no hotel.')) return;
   pushUndo();
   trip().hotels = trip().hotels.filter(x => x.id !== hotelId);
-  trip().days.forEach(d => { if(d.hotelId === hotelId) d.hotelId = null; });
+  trip().days.forEach(d => {
+    if(d.startHotelId === hotelId) d.startHotelId = null;
+    if(d.endHotelId === hotelId) d.endHotelId = null;
+  });
   saveState();
   renderAll();
   renderInfo();
@@ -1701,7 +1729,7 @@ function runSearch(){
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'search-row';
-    const usedBy = trip().days.filter(d => d.hotelId === h.id).map(d => 'D' + d.id).join(', ');
+    const usedBy = trip().days.filter(d => d.startHotelId === h.id || d.endHotelId === h.id).map(d => 'D' + d.id).join(', ');
     row.innerHTML = `<span class="sr-icon">🏨</span>
       <span class="sr-main"><span class="sr-name">${esc(h.name)}</span><span class="sr-where">Hotel${usedBy ? ' · ' + usedBy : ''}</span></span>`;
     row.addEventListener('click', () => { closeSearch(); setView('info'); });
@@ -1981,6 +2009,13 @@ function renderDayMapsOverlay(plan, opts){
       const m = L.map(elId, { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
       const pts = [];
+      const hotelPin = (h) => L.marker([h.lat, h.lng], { icon: L.divIcon({
+        className: '', html: '<div class="map-pin hotel-pin ap-pin"><span>' + (h.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
+        iconSize: [20, 20], iconAnchor: [10, 10]
+      })}).addTo(m);
+      const startH = scheds[i].startHotel && scheds[i].startHotel.lat != null ? scheds[i].startHotel : null;
+      const endH = scheds[i].endHotel && scheds[i].endHotel.lat != null ? scheds[i].endHotel : null;
+      if(startH){ hotelPin(startH); pts.push([startH.lat, startH.lng]); }
       let num = 0;
       scheds[i].rows.forEach(r => {
         const s = r.stop;
@@ -1992,13 +2027,9 @@ function renderDayMapsOverlay(plan, opts){
         })}).addTo(m);
         pts.push([s.lat, s.lng]);
       });
-      if(scheds[i].hotel && scheds[i].hotel.lat != null && pts.length){
-        const h = scheds[i].hotel;
-        L.marker([h.lat, h.lng], { icon: L.divIcon({
-          className: '', html: '<div class="map-pin hotel-pin ap-pin"><span>' + (h.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
-          iconSize: [20, 20], iconAnchor: [10, 10]
-        })}).addTo(m);
-        pts.push([h.lat, h.lng]);
+      if(endH){
+        if(!startH || startH.id !== endH.id) hotelPin(endH);
+        pts.push([endH.lat, endH.lng]);
       }
       if(pts.length > 1){
         L.polyline(pts, { color: dayAccent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);

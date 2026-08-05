@@ -201,14 +201,10 @@
         <input type="hidden" id="de-index" value="">
         <label>Title<input type="text" id="de-title" required></label>
         <label>Start time<input type="time" id="de-start" required></label>
-        <label>Hotel<select id="de-hotel"></select></label>
-        <label id="de-bookend-label">Hotel anchors…
-          <select id="de-bookend">
-            <option value="both">Start and end of the day</option>
-            <option value="start">Start only (day ends elsewhere)</option>
-            <option value="end">End only (arrive during the day, return here)</option>
-          </select>
-        </label>
+        <label>Start hotel — where the day begins<select id="de-start-hotel"></select></label>
+        <label>End hotel — where this night is spent<select id="de-end-hotel"></select></label>
+        <p class="al-hint">Most days start and end at the same hotel. An arrival day often has no start hotel, a
+          departure day no end hotel, and a hotel-change day one of each — the schedule adds the travel legs to match.</p>
         <label>Day colour</label>
         <div class="day-color-row" id="de-color-row" role="radiogroup" aria-label="Day colour"></div>
         <p class="al-hint">Give days in different cities or areas their own colour — the day's tab, pins, routes and highlights all follow it.</p>

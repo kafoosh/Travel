@@ -6,7 +6,10 @@
    real numbers via the routing 'update' event.
 
    Understands:
-   - hotel bookends per day: 'both' | 'start' | 'end'
+   - per-day start/end hotels: the day departs from its start
+     hotel and returns to its end hotel — usually the same one,
+     but either can be missing (arrival/departure days) or a
+     different hotel (a check-out/check-in day)
    - fixed start times on stops (flight lands 14:30, timed
      museum entry…): the schedule waits when early and flags
      the overrun when late
@@ -19,8 +22,12 @@
 import { parseTime, dayDate } from './util.js';
 import { estimateLeg } from './routing.js';
 
-export function getHotel(trip, day){
-  return trip.hotels.find(h => h.id === day.hotelId) || null;
+export function getStartHotel(trip, day){
+  return trip.hotels.find(h => h.id === day.startHotelId) || null;
+}
+
+export function getEndHotel(trip, day){
+  return trip.hotels.find(h => h.id === day.endHotelId) || null;
 }
 
 export function departPoint(stop){
@@ -41,21 +48,22 @@ export function computeSchedule(trip, day){
   let trailTransfer = null;
   let walkKm = 0, otherKm = 0;
 
-  const hotel = getHotel(trip, day);
-  const bookend = day.bookend || 'both';
-  const hotelUsable = hotel && hotel.lat != null;
-  const startAtHotel = hotelUsable && bookend !== 'end';
-  const endAtHotel = hotelUsable && bookend !== 'start';
+  const startHotel = getStartHotel(trip, day);
+  const endHotel = getEndHotel(trip, day);
+  const startAtHotel = !!(startHotel && startHotel.lat != null);
+  const endAtHotel = !!(endHotel && endHotel.lat != null);
 
   if(startAtHotel){
-    prev = { lat: hotel.lat, lng: hotel.lng, __hotel: true };
+    prev = { lat: startHotel.lat, lng: startHotel.lng, __hotel: true };
   }
 
   const legOpts = (a, b, mode) => ({
-    // An explicit per-leg mode wins; otherwise boat-shuttle hotels force
-    // their boat leg and everything else is chosen automatically.
+    // An explicit per-leg mode wins; otherwise a boat-shuttle hotel forces
+    // its own leg — departing the start hotel, or returning to the end one —
+    // and everything else is chosen automatically.
     mode: mode || null,
-    boat: !mode && !!(hotel && hotel.mode === 'boat' && (a.__hotel || b.__hotel)),
+    boat: !mode && !!((a.__hotel && startHotel && startHotel.mode === 'boat') ||
+                      (b.__hotel && endHotel && endHotel.mode === 'boat')),
     dayDate: date,
     departMinutes: t,
   });
@@ -111,12 +119,12 @@ export function computeSchedule(trip, day){
   if(endAtHotel && rows.length){
     const lastDep = [...rows].map(r => departPoint(r.stop)).reverse().find(Boolean);
     if(lastDep){
-      const back = { lat: hotel.lat, lng: hotel.lng, __hotel: true };
+      const back = { lat: endHotel.lat, lng: endHotel.lng, __hotel: true };
       trailTransfer = estimateLeg(lastDep, back, legOpts(lastDep, back, day.returnBy));
       countDist(trailTransfer);
       t += trailTransfer.minutes;
     }
   }
 
-  return { rows, leadTransfer, trailTransfer, returnTime: t, hotel, bookend, date, walkKm, otherKm };
+  return { rows, leadTransfer, trailTransfer, returnTime: t, startHotel, endHotel, date, walkKm, otherKm };
 }
