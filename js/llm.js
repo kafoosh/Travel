@@ -86,6 +86,29 @@ function infoSpec(){
     .join('\n\n');
 }
 
+/* How the assistant should source "- image:" URLs. Written once and shared by
+   both prompts, since the sourcing advice is the same whether the stop is new
+   or being filled in. img.js already repairs the near-misses — a Commons
+   *File:* page link, a thumbnail width that 404s, http on an https page — so
+   the rules below aim at the two things it cannot repair: a file name that was
+   invented, and a URL that isn't an image at all. */
+const IMAGE_FIELD = '<public image URL — include one wherever a real photo exists; see PHOTOS below>';
+
+function imageSpec(){
+  return `PHOTOS
+======
+Give every location, hotel and unassigned stop an "- image:" line wherever you can source a real photo of it. The planner shows it on the stop card, in the map popup and in the offline copy, and falls back to a category icon when the field is absent.
+
+- Wikimedia Commons first, written in exactly this form:
+  https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200
+  <File_Name> is the file's name on Commons — underscores for spaces, extension included, e.g. .../Special:FilePath/Colosseo_2020.jpg?width=1200. Most landmarks, museums, churches, parks, viewpoints, stations and airports have one, and a file name you know from a Commons *File:* page or a Wikipedia infobox is exactly what goes here.
+- Never hand-build an upload.wikimedia.org path — the two hashed folders in it cannot be derived from the file name, so the URL will 404. Use the Special:FilePath form above and let it redirect.
+- Where Commons has nothing, another public source is fine: a restaurant's or hotel's own site, an official tourism board, a museum's press page. It must be a direct link to the image file (https, ending .jpg / .jpeg / .png / .webp) — not a page that contains the photo, not a search-results link, not a watermarked stock preview.
+- Only give a URL you are genuinely confident exists. Do NOT invent a plausible-looking file name to fill the field: in the planner a wrong URL and a missing one look identical (the category icon shows), so a guess buys nothing and costs accuracy. Skip the field instead.
+- One photo per stop, landscape where there's a choice, showing the place itself rather than a map, logo, portrait or crowd.
+- If you can search or browse the web, look the files up rather than recalling them — searching Wikimedia Commons for the place name, or opening its Wikipedia article and taking the file name from the infobox photo, gives a name that certainly exists.`;
+}
+
 /* Which sections this trip already has, and which are absent. serializeTrip
    omits empty ones entirely, so for a trip whose Trip Info tab is blank the
    embedded document shows no trace that the section exists — say so in words
@@ -122,6 +145,7 @@ RULES
 - Each day says where it starts and ends. "- hotel: X" means the day starts AND ends at hotel X ("none" = no hotel). A day may instead carry a "- start hotel:" / "- end hotel:" pair when its two ends differ: an arrival day has "start hotel: none", a departure day has "end hotel: none", and a hotel-change day starts at the old hotel and ends at the new one — the end hotel is where that night is spent. Keep these lines matching where the traveller actually wakes up and sleeps, and update them whenever you add, remove or reorder days, or change hotels.
 - A moving stop — a hike, a train, a flight, a ferry (category hike | travel | flight | boat) — may carry "- end lat:" / "- end lng:" lines: its lat/lng is the DEPARTURE point (trailhead, departure station or airport) and the end coordinates are where it ARRIVES; the commute to the departure point is computed like any leg, "duration" is the leg itself, and the day continues from the arrival. Keep both ends exactly as they are when moving such stops between days, and give both ends to any within-trip train/flight/ferry you add — never place one only at its arrival point.
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
+- Photos: give every stop and hotel you add an "- image:" line, and fill the gaps — where an existing stop or hotel has no "- image:" line, add one if you can source a real photo of it (see PHOTOS below). Never change or remove an image line that is already there; a photo I picked stays mine.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
 - Keep "## Unassigned" present and updated.
 - Keep the "## Checklist" section and every one of its "- [ ] " / "- [x] " lines exactly as they are unless I ask to change them (the "[x]" ones are already done).
@@ -138,6 +162,8 @@ The document ends with "## Trip Info", built from exactly these five "###" subse
 ${infoSpec()}
 
 ${infoStatus(trip.info)}
+
+${imageSpec()}
 
 CURRENT TRIP DOCUMENT
 =====================
@@ -177,7 +203,7 @@ FORMAT SPECIFICATION
 - lat: <decimal latitude>
 - lng: <decimal longitude>
 - transport: walk        <"walk" normally; "boat" only if every trip to/from the hotel is by boat shuttle>
-- image: <public image URL, optional>
+- image: ${IMAGE_FIELD}
 - description: <one sentence>
 
 ## Day 1: <short day title, e.g. "Ancient Rome">
@@ -197,7 +223,7 @@ Use this for exactly three kinds of day: an ARRIVAL day ("start hotel: none" —
 - duration: <realistic visit length in minutes>
 - fixed start: <optional HH:MM for things pinned to a clock: flight landing/boarding time, train departure, timed museum entry. The schedule waits for it and flags conflicts.>
 - arrive by: <optional: walk | cycle | transit | taxi | boat — pins how the traveller reaches THIS stop when one mode clearly makes sense (a ferry-only island, a cycling city, a stop best reached by taxi). Omit for automatic selection.>
-- image: <public image URL, optional — use Wikimedia Commons in exactly this form: https://commons.wikimedia.org/wiki/Special:FilePath/<File_Name>?width=1200, with a file name you are confident exists. Never hand-build an upload.wikimedia.org path (the hashed folders can't be guessed), and skip the field entirely rather than inventing a URL — a missing image just shows the category icon.>
+- image: ${IMAGE_FIELD}
 - description: <1–2 sentences: what it is and one practical tip (booking, timing, closures)>
 - detail: <2–4 sentences of history or a great story — the kind of thing a knowledgeable friend would tell you standing in front of it>
 - tags: <optional comma-separated labels, e.g. a theme the trip follows>
@@ -232,6 +258,8 @@ Arrival/departure/transfer days: model the flight or train as its own stop as de
 
 ${infoSpec()}
 
+${imageSpec()}
+
 RULES
 =====
 - Wrap the whole document in one fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste. Inside the block, it starts with "# Trip:".
@@ -239,6 +267,7 @@ RULES
 - Durations are visit time only; travel between stops is computed automatically.
 - Keep each "- key: value" on a single line (no line breaks inside a value).
 - Cluster each day geographically; put lunch/dinner stops where the day actually is at that time.
+- Add an "- image:" line to every stop and hotel you can find a real photo for, following PHOTOS above.
 - Fill in all five "## Trip Info" subsections — they are part of the plan, not optional extras.
 - If asked for revisions, output the complete document again in full.`;
 }
