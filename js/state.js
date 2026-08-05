@@ -111,6 +111,7 @@ export function normalizeTrip(t){
     if(!Array.isArray(s.tags)) s.tags = [];
     if(s.notes == null) s.notes = '';
     s.done = !!s.done;
+    s.hidden = !!s.hidden;
     if(!['walk','cycle','transit','taxi','boat'].includes(s.arriveBy)) s.arriveBy = null;
   });
   return trip;

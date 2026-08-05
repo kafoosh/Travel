@@ -131,6 +131,23 @@ check('done accepts what a person or an LLM writes', (() => {
   return Object.values(t.stops).find(s => s.name === 'Colosseum').done === true
     && Object.values(t.stops).find(s => s.name === 'Roman Forum + Palatine Hill').done === false;
 })());
+check('hidden-from-map survives a round-trip', (() => {
+  colosseum.hidden = true;
+  const t = parseTrip(serializeTrip(trip)).trip;
+  const c = Object.values(t.stops).find(s => s.name === 'Colosseum');
+  const others = Object.values(t.stops).filter(s => s.name !== 'Colosseum');
+  return c.hidden === true && others.every(s => s.hidden === false);
+})());
+check('an untouched trip writes no hidden lines', !serializeTrip(parseTrip(md).trip).includes('- hidden:'));
+check('hidden is written once set', (serializeTrip(trip).match(/^- hidden: yes$/gm) || []).length === 1);
+check('hidden accepts what a person or an LLM writes', (() => {
+  const src = serializeTrip(trip)
+    .replace('- hidden: yes', '- off map: TRUE')
+    .replace('### Roman Forum + Palatine Hill', '### Roman Forum + Palatine Hill\n- hidden: no');
+  const t = parseTrip(src).trip;
+  return Object.values(t.stops).find(s => s.name === 'Colosseum').hidden === true
+    && Object.values(t.stops).find(s => s.name === 'Roman Forum + Palatine Hill').hidden === false;
+})());
 check('done trip is still a fixed point', (() => {
   const t = parseTrip(serializeTrip(trip)).trip;
   return JSON.stringify(t) === JSON.stringify(parseTrip(serializeTrip(t)).trip);
@@ -287,6 +304,23 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       return picked[0].num === '4' && picked[1].num === '5';
     })());
 
+    // Hiding a stop from the map takes its pin and nothing else: it stays a
+    // point of the day, keeps its number, and the route still runs through it.
+    const ht = parseTrip(md).trip;
+    const hiddenStop = ht.stops[ht.days[1].order[2]];
+    hiddenStop.hidden = true;
+    const hpts = dayMapPoints(ht, ht.days[1]);
+    check('a hidden stop is still a day point, flagged',
+      hpts.length === numbered.length && hpts.filter(p => p.hidden).length === 1);
+    check('hiding one stop renumbers nothing',
+      hpts.filter(p => p.cat !== 'hotel').map(p => p.num).join(',') ===
+      numbered.filter(p => p.cat !== 'hotel').map(p => p.num).join(','));
+    const hkml = tripKml(ht);
+    check('kml drops the hidden pin', (hkml.match(/<Placemark>/g) || []).length === placemarks - 1);
+    check('kml keeps the route through it',
+      (hkml.match(/<LineString>/g) || []).length === (kml.match(/<LineString>/g) || []).length
+      && hkml.includes(hiddenStop.lng + ',' + hiddenStop.lat + ',0'));
+
     /* --- 5b. point-to-point travel legs (the Rome → Venice transfer day) --- */
     console.log('point-to-point legs:');
     const d6 = t.days[5];
@@ -339,6 +373,22 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
           && !h.includes('data-check="k1"') && h.includes('data-check="k2"');
       })());
       check('photos are only counted once', photoUrls(ot).length === new Set(photoUrls(ot)).size);
+      check('the offline sketch leaves out a stop hidden from the map', (() => {
+        const pinCount = h => (h.match(/<g class="pin/g) || []).length;
+        const before = parseTrip(md).trip;
+        const after = parseTrip(md).trip;
+        after.stops[after.days[1].order[2]].hidden = true;
+        const opts = { generatedAt: new Date('2026-01-01') };
+        const hb = buildOfflineHtml(before, opts), ha = buildOfflineHtml(after, opts);
+        // One pin fewer, and exactly one number gone from the sketches — the
+        // rest keep theirs, so the day reads as a gap, not a shuffle.
+        const nums = html => [...html.matchAll(/<g class="pin"><circle[^>]*><\/circle><text[^>]*>([^<]+)<\/text>/g)].map(m => m[1]);
+        const tally = arr => arr.reduce((m, n) => (m[n] = (m[n] || 0) + 1, m), {});
+        const ta = tally(nums(ha)), tb = tally(nums(hb));
+        const changed = Object.keys(tb).filter(k => (ta[k] || 0) !== tb[k]);
+        return pinCount(ha) === pinCount(hb) - 1
+          && changed.length === 1 && tb[changed[0]] - (ta[changed[0]] || 0) === 1;
+      })());
 
       // The trip file travels inside the page, so a phone can hand the plan
       // back to the planner (or to another device) with nothing but the file.

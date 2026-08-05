@@ -591,6 +591,46 @@ h1.title:hover{color:var(--accent-dark);}
 .stop-card.done .stop-number{background:var(--ink-soft);}
 /* The tick itself must stay legible — it's the way back out. */
 .stop-card.done .done-btn, .bin-row.done .done-btn{opacity:1;}
+/* =========================================================
+   HIDDEN FROM THE MAP
+   The eye beside the tick takes a stop's pin off the map and
+   nothing else: the card stays where it is, keeps its time and
+   keeps its number — the number badge just goes hollow, so a
+   gap in the map's numbers has something on the card to explain
+   it. The eye gains a slash when it's on.
+   ========================================================= */
+.hide-btn{
+  position:relative;
+  font-size:12px;
+  line-height:1;
+  padding:5px 8px;
+  border-radius:6px;
+  border:1px solid var(--line);
+  background:var(--card);
+  color:var(--ink-soft);
+  cursor:pointer;
+}
+.hide-btn:hover{background:var(--accent-tint); border-color:var(--accent);}
+/* The eye is a text-presentation glyph, so it follows `color` — it has to
+   turn white or it vanishes into the filled state. */
+.hide-btn.off{background:var(--ink-soft); border-color:var(--ink-soft); color:#fff;}
+/* No eye-with-a-slash that renders everywhere — draw the slash. */
+.hide-btn.off::after{
+  content:'';
+  position:absolute;
+  left:15%; right:15%; top:50%;
+  border-top:2px solid #fff;
+  transform:rotate(-20deg);
+  pointer-events:none;
+}
+.stop-card.off-map, .bin-row.off-map{opacity:.62;}
+.stop-card.off-map .stop-number{
+  background:transparent;
+  color:var(--ink-soft);
+  border:1px dashed var(--ink-soft);
+}
+/* The eye stays legible on a dimmed card — it's the way back. */
+.stop-card.off-map .hide-btn, .bin-row.off-map .hide-btn{opacity:1;}
 .day-progress{
   font-family:'IBM Plex Mono', monospace;
   font-size:11px;
@@ -601,6 +641,7 @@ h1.title:hover{color:var(--accent-dark);}
   background:var(--accent-tint);
 }
 #modal-done.on{background:var(--accent); border-color:var(--accent); color:#fff;}
+#modal-hide.on{background:var(--ink-soft); border-color:var(--ink-soft); color:#fff;}
 
 .bin-list{padding:16px 22px 26px;}
 .bin-row{
@@ -1242,12 +1283,13 @@ h1.title:hover{color:var(--accent-dark);}
   .stop-number{ width:26px; height:26px; font-size:12.5px; }
 
   .manage-row{ flex-wrap:wrap; gap:8px; width:100%; }
-  /* A phone card's inner column is ~190px: "Move to…" plus two 44px touch
+  /* A phone card's inner column is ~190px: "Move to…" plus three 44px touch
      targets can't share a line without squeezing the select to a stub. So
-     the select takes its own line and ✓ / 🗑 sit together under it. */
+     the select takes its own line and ✓ / 👁 / 🗑 sit together under it. */
   .move-to-day{ flex:1 1 100%; min-width:0; max-width:100%; min-height:40px; font-size:12px; }
   .bin-btn{ min-height:40px; min-width:44px; font-size:15px; flex:0 0 auto; }
   .done-btn{ min-height:40px; min-width:44px; font-size:15px; flex:0 0 auto; }
+  .hide-btn{ min-height:40px; min-width:44px; font-size:15px; flex:0 0 auto; }
 
   .bin-list{ padding:12px 12px 20px; }
   .bin-row{ align-items:flex-start; }
