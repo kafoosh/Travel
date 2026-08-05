@@ -215,7 +215,9 @@ function daySvg(trip, day, sched){
     return `<polyline class="rt${routed ? '' : ' est'}" points="${coords.map(c => px(c[1]) + ',' + py(c[0])).join(' ')}"></polyline>`;
   }).join('');
 
-  const pins = pts.map(p => {
+  // A stop hidden from the map in the planner is hidden here too — its number
+  // is simply missing from the sketch, exactly as it is on screen.
+  const pins = pts.filter(p => !p.hidden).map(p => {
     const x = px(p.lng), y = py(p.lat);
     if(p.num == null)
       return `<g class="pin hotel"><circle cx="${x}" cy="${y}" r="9"></circle><text x="${x}" y="${y + 3.5}">⌂</text></g>`;
@@ -273,7 +275,7 @@ function stopCardHtml(stop, opts){
   return `
   <article class="stop${done ? ' done' : ''}" id="${id}" data-search="${esc(searchText(stop, dayLabel))}">
     <div class="stop-head">
-      <span class="num${num == null ? ' nonum' : ''}">${num == null ? '·' : esc(String(num))}</span>
+      <span class="num${num == null ? ' nonum' : ''}${stop.hidden ? ' offmap' : ''}"${stop.hidden ? ' title="Hidden from the map — the number stays with the stop"' : ''}>${num == null ? '·' : esc(String(num))}</span>
       ${photoHtml(stop.img, stop.cat, stop.name, photos)}
       <div class="stop-title">
         ${time ? `<p class="time">${esc(time)}</p>` : ''}
@@ -499,6 +501,9 @@ svg.map .sc text{fill:var(--ink-soft); font-family:var(--mono); font-size:11px;}
 .num{flex:none; min-width:24px; height:24px; padding:0 5px; border-radius:12px; background:var(--accent); color:#fff;
   font-family:var(--mono); font-size:12px; display:flex; align-items:center; justify-content:center;}
 .num.nonum{background:transparent; color:var(--ink-soft); border:1px dashed var(--line);}
+/* Hidden from the map in the planner: it keeps its number, the sketch doesn't
+   draw it — the hollow badge is what explains the gap. */
+.num.offmap{background:transparent; color:var(--ink-soft); border:1px dashed var(--ink-soft);}
 .ph{flex:none; width:64px; height:64px; border-radius:10px; background:var(--accent-tint); overflow:hidden;
   display:flex; align-items:center; justify-content:center; font-size:26px; line-height:1;}
 .ph::before{content:attr(data-ico);}

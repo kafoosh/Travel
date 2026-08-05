@@ -70,7 +70,9 @@ export function blankTrip(){
     theme:'parchment',
     hotels:[],               // {id, name, lat, lng, mode:'walk'|'boat', img, desc}
     days:[newDay(1), newDay(2), newDay(3)],
-    stops:{},                // id -> {id,name,cat,dur,lat,lng,img,desc,detail,notes,tags:[]}
+    // done: ticked off on the trip. hidden: kept off the map's pins — both are
+    // display flags the schedule and the optimiser never read.
+    stops:{},                // id -> {id,name,cat,dur,lat,lng,img,desc,detail,notes,tags:[],done,hidden}
     // Stops with no day yet. Surfaced in the UI as "Unassigned"; the field
     // keeps its original name because live shared rooms and saved drafts
     // already carry it.
@@ -107,6 +109,9 @@ function stopLines(s){
   // Ticked off on the trip itself — written only when true, so a plan that
   // hasn't started yet reads exactly as it always did.
   if(s.done) out.push('- done: yes');
+  // Kept out of the map's pins, but still a stop of the day in every other
+  // way. Also written only when true.
+  if(s.hidden) out.push('- hidden: yes');
   if(s.img) out.push('- image: ' + encVal(s.img));
   if(s.desc) out.push('- description: ' + encVal(s.desc));
   if(s.detail) out.push('- detail: ' + encVal(s.detail));
@@ -234,6 +239,7 @@ const KEY_ALIASES = {
   detail:'detail', details:'detail', history:'detail', trivia:'detail', 'long description':'detail',
   notes:'notes', note:'notes',
   done:'done', visited:'done', completed:'done', seen:'done',
+  hidden:'hidden', hide:'hidden', 'off map':'hidden', 'hide on map':'hidden',
   tags:'tags',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
@@ -298,7 +304,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -362,6 +368,7 @@ export function parseTrip(text){
         fixedStart: cur.fixedStart || null,
         arriveBy: cur.arriveBy || null,
         done: !!cur.done,
+        hidden: !!cur.hidden,
         img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
         notes: cur.notes || '', tags: cur.tags || [] };
       trip.stops[id] = stop;
@@ -452,6 +459,7 @@ export function parseTrip(text){
         else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
         else if(key === 'cat') cur.cat = normCat(value);
         else if(key === 'done') cur.done = isYes(value);
+        else if(key === 'hidden') cur.hidden = isYes(value);
         else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
         else if(key === 'sday' && curOptMeta){ const n = parseInt(value, 10); if(!isNaN(n)) curOptMeta.day = n; }
         else if(key === 'snote' && curOptMeta) curOptMeta.note = decVal(value);
@@ -535,7 +543,7 @@ function splitCsvLine(line, delim){
 }
 
 /* Accepts a CSV with a header row. Recognised columns (any order, case-insensitive):
-   name, day, lat, lng, category, duration, description, detail, image, notes, tags, done.
+   name, day, lat, lng, category, duration, description, detail, image, notes, tags, done, hidden.
    day may be a number, "unassigned"/"optional", or empty (→ day 1). */
 export function parseCsv(text){
   const warnings = [];
@@ -555,6 +563,7 @@ export function parseCsv(text){
     notes: ['notes','note'].map(col).find(i => i !== -1) ?? -1,
     tags: col('tags'),
     done: ['done','visited','completed'].map(col).find(i => i !== -1) ?? -1,
+    hidden: ['hidden','hide','off map'].map(col).find(i => i !== -1) ?? -1,
   };
   if(idx.name === -1) throw new Error('CSV must have a "name" column.');
 
@@ -578,6 +587,7 @@ export function parseCsv(text){
       img: get(cells, idx.img), desc: get(cells, idx.desc), detail: get(cells, idx.detail),
       notes: get(cells, idx.notes),
       done: idx.done !== -1 && !!get(cells, idx.done) && isYes(get(cells, idx.done)),
+      hidden: idx.hidden !== -1 && !!get(cells, idx.hidden) && isYes(get(cells, idx.hidden)),
       tags: get(cells, idx.tags) ? get(cells, idx.tags).split(/[,|]/).map(t => t.trim()).filter(Boolean) : []
     };
     const dayRaw = get(cells, idx.day).toLowerCase();

@@ -435,6 +435,54 @@ function wireDoneBtn(root, id, after){
   });
 }
 
+/* =========================================================
+   HIDE FROM THE MAP
+
+   The eye next to the tick takes a stop's pin off the map
+   without taking the stop out of the day: a corner of the map
+   too crowded to read, a stop you're undecided about, a hotel
+   errand nobody needs a pin for.
+
+   It changes what is drawn and nothing else. The stop keeps its
+   place, its time and — the point of it — its number, so the
+   numbers on the cards and the pins that remain still agree:
+   the map reads 1, 2, 4 and the day's third card is the one
+   that isn't there. The route still runs through it, because
+   the day still goes there. Like the tick, it lives on the stop,
+   so it travels through export/import and everyone in a shared
+   room sees the same map.
+   ========================================================= */
+function hideBtnHtml(stop){
+  const on = !!stop.hidden;
+  return `<button class="hide-btn${on ? ' off' : ''}" type="button" aria-pressed="${on}" data-hide-id="${esc(stop.id)}"` +
+    ` title="${on ? 'Hidden from the map — click to show' : 'Hide from the map'}"` +
+    ` aria-label="${on ? 'Show on map' : 'Hide from map'}: ${esc(stop.name)}">👁</button>`;
+}
+
+/* Wire the button inside `root` (a card or row). `after` re-renders whatever
+   draws the pins — the map is the whole point, so unlike the tick this one
+   always has something to refresh. */
+function wireHideBtn(root, id, after){
+  const btn = root.querySelector('.hide-btn');
+  if(!btn) return;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const s = trip().stops[id];
+    if(!s) return;
+    pushUndo();
+    s.hidden = !s.hidden;
+    saveState();
+    const card = btn.closest('.stop-card, .bin-row');
+    if(card) card.classList.toggle('off-map', s.hidden);
+    btn.classList.toggle('off', s.hidden);
+    btn.setAttribute('aria-pressed', String(!!s.hidden));
+    btn.title = s.hidden ? 'Hidden from the map — click to show' : 'Hide from the map';
+    btn.setAttribute('aria-label', (s.hidden ? 'Show on map: ' : 'Hide from map: ') + s.name);
+    if(after) after();
+    updateUndoButton();
+  });
+}
+
 /* "3 of 7 done" in the day's header — only once something is ticked. */
 function dayProgressText(day){
   const stops = day.order.map(id => trip().stops[id]).filter(Boolean);
@@ -543,14 +591,17 @@ function renderScheduleList(day, sched){
 
     const s = row.stop;
     const card = document.createElement('div');
-    card.className = 'stop-card' + (s.cat === 'travel' || s.cat === 'boat' ? ' travel-row' : '') + (s.done ? ' done' : '');
+    card.className = 'stop-card' + (s.cat === 'travel' || s.cat === 'boat' ? ' travel-row' : '') +
+      (s.done ? ' done' : '') + (s.hidden ? ' off-map' : '');
     card.draggable = false;
     card.dataset.id = s.id;
 
+    // A hidden stop still takes its number: the numbers left on the map are
+    // the ones the cards carry, with the hidden stop's simply missing.
     const hasMapPin = s.lat != null && s.lng != null;
     if(hasMapPin) mapOrder += 1;
     const numberBadgeHtml = hasMapPin
-      ? `<span class="stop-number">${mapOrder}</span>`
+      ? `<span class="stop-number${s.hidden ? ' off-map' : ''}"${s.hidden ? ' title="Hidden from the map — the number stays with the stop"' : ''}>${mapOrder}</span>`
       : `<span class="stop-number no-pin" title="No coordinates — not shown on map">–</span>`;
 
     const chips = s.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') +
@@ -584,6 +635,7 @@ function renderScheduleList(day, sched){
             ${dayOptionsHtml}
           </select>
           ${doneBtnHtml(s)}
+          ${hideBtnHtml(s)}
           <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">🗑</button>
         </div>
       </div>
@@ -603,6 +655,7 @@ function renderScheduleList(day, sched){
       else if(v) moveToDay(day, s.id, parseInt(v, 10));
     });
     wireDoneBtn(card, s.id, () => refreshDayProgress(day));
+    wireHideBtn(card, s.id, () => renderMap(day, sched));
     card.querySelector('.bin-btn').addEventListener('click', (e) => { e.stopPropagation(); removeToBin(day, s.id); });
 
     card.addEventListener('click', (e) => {
@@ -968,17 +1021,21 @@ function renderMap(day, sched){
   sched.rows.forEach(row => {
     const s = row.stop;
     if(s.lat == null || s.lng == null) return;
+    // The number is counted before the pin is drawn, so hiding one stop never
+    // renumbers the others — the map keeps 1, 2, 4 and the cards still match.
     order += 1;
-    const icon = L.divIcon({
-      className: '',
-      // A ticked-off stop keeps its pin and its number — greyed, so the map
-      // reads as "here's what's left" at a glance.
-      html: '<div class="map-pin' + (s.done ? ' done-pin' : '') + '"><span>' + order + '</span></div>',
-      iconSize: [26,26],
-      iconAnchor: [13,24]
-    });
-    L.marker([s.lat, s.lng], { icon }).addTo(mapLayerGroup)
-      .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start) + (s.done ? ' · ✓ done' : ''));
+    if(!s.hidden){
+      const icon = L.divIcon({
+        className: '',
+        // A ticked-off stop keeps its pin and its number — greyed, so the map
+        // reads as "here's what's left" at a glance.
+        html: '<div class="map-pin' + (s.done ? ' done-pin' : '') + '"><span>' + order + '</span></div>',
+        iconSize: [26,26],
+        iconAnchor: [13,24]
+      });
+      L.marker([s.lat, s.lng], { icon }).addTo(mapLayerGroup)
+        .bindPopup('<b>' + esc(s.name) + '</b><br>' + formatTime(row.start) + (s.done ? ' · ✓ done' : ''));
+    }
     const cur = [s.lat, s.lng];
     // travelPath on a row is the routed geometry of the leg ARRIVING at it
     // (computed in the same sequence computeSchedule walked).
@@ -998,8 +1055,11 @@ function renderMap(day, sched){
         iconSize: [26,26],
         iconAnchor: [13,24]
       });
-      L.marker(end, { icon: endIcon }).addTo(mapLayerGroup)
-        .bindPopup('<b>' + esc(s.name) + '</b><br>' + (isHike ? 'hike ends here' : 'arrives here'));
+      // Both ends belong to the one stop: hiding it takes the arrival pin too.
+      if(!s.hidden){
+        L.marker(end, { icon: endIcon }).addTo(mapLayerGroup)
+          .bindPopup('<b>' + esc(s.name) + '</b><br>' + (isHike ? 'hike ends here' : 'arrives here'));
+      }
       segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: isHike });
       pts.push(end);
       prevPt = end;
@@ -1085,6 +1145,7 @@ function openModal(stopId, row){
   $('modal-text').textContent = full;
   $('modal-notes').value = stop.notes || '';
   paintModalDone(stop);
+  paintModalHide(stop);
 
   $('modal-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
@@ -1110,14 +1171,35 @@ function toggleModalDone(){
   updateUndoButton();
 }
 
+function paintModalHide(stop){
+  const btn = $('modal-hide');
+  if(!btn) return;
+  const on = !!stop.hidden;
+  btn.textContent = on ? '👁 Show on map' : '👁 Hide from map';
+  btn.setAttribute('aria-pressed', String(on));
+  btn.classList.toggle('on', on);
+  btn.disabled = stop.lat == null;   // nothing to hide: it was never on the map
+  btn.title = stop.lat == null ? 'No coordinates — this stop isn’t on the map anyway' : '';
+}
+
+function toggleModalHide(){
+  const s = modalStopId ? trip().stops[modalStopId] : null;
+  if(!s) return;
+  pushUndo();
+  s.hidden = !s.hidden;
+  saveState();
+  paintModalHide(s);
+  updateUndoButton();
+}
+
 function closeModal(){
   const hadStop = modalStopId;
   modalStopId = null;
   $('modal-overlay').classList.remove('open');
   document.body.style.overflow = '';
   if(lastFocusedEl && lastFocusedEl.focus) lastFocusedEl.focus();
-  // Notes or the done tick may have changed while the modal was open —
-  // refresh so the 📝 chip (and the greyed-out card) reflect it immediately.
+  // Notes, the done tick or the map eye may have changed while the modal was
+  // open — refresh so the 📝 chip, the greyed-out card and the pins follow.
   if(hadStop){
     if(state.currentView === 'days') renderDayPanel();
     else if(state.currentView === 'optional') renderOptional();
@@ -1228,7 +1310,7 @@ function submitLocationForm(e){
   const id = editId || nextStopId();
   // The form doesn't cover everything a stop carries: an edit rebuilds the
   // object, so the fields it never asked about are carried across rather
-  // than quietly reset (a pinned transport mode, a done tick).
+  // than quietly reset (a pinned transport mode, a done tick, a hidden pin).
   const prev = editId ? trip().stops[editId] : null;
   trip().stops[id] = {
     id, name, cat,
@@ -1240,6 +1322,7 @@ function submitLocationForm(e){
     fixedStart: /^\d{1,2}:\d{2}$/.test($('al-fixed').value) ? $('al-fixed').value : null,
     arriveBy: prev ? prev.arriveBy || null : null,
     done: prev ? !!prev.done : false,
+    hidden: prev ? !!prev.hidden : false,
     img: $('al-img').value.trim(),
     desc: $('al-desc').value.trim(),
     detail: $('al-detail').value.trim(),
@@ -1570,12 +1653,14 @@ function openGmapsPicker(day){
     alert('This day needs at least two located stops for a Google Maps route.');
     return;
   }
-  gmapsPicked = gmapsPts.map(() => true);
+  // Everything is ticked on open except the stops taken off the map — they are
+  // listed, and can be ticked back in, but they don't shape the route by default.
+  gmapsPicked = gmapsPts.map(p => !p.hidden);
   $('gmaps-heading').textContent = 'Google Maps — Day ' + day.id;
   const list = $('gmaps-list');
   list.innerHTML = gmapsPts.map(p => `
     <label class="gmaps-row">
-      <input type="checkbox" checked>
+      <input type="checkbox"${p.hidden ? '' : ' checked'}>
       <span class="gm-num${p.num == null ? ' gm-num-none' : ''}"${p.num == null ? ' title="A hotel bookend — the day doesn&#39;t number it"' : ''}>${p.num == null ? '–' : esc(p.num)}</span>
       <span class="gm-icon" aria-hidden="true">${ICONS[p.cat] || '📍'}</span>
       <span class="gm-main">
@@ -1753,7 +1838,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
   const s = trip().stops[id];
   if(!s) return null;
   const row = document.createElement('div');
-  row.className = 'bin-row all-row' + (s.done ? ' done' : '');
+  row.className = 'bin-row all-row' + (s.done ? ' done' : '') + (s.hidden ? ' off-map' : '');
   const dayOptions = trip().days.map(d =>
     `<option value="${d.id}" ${(!isOptional && fromDay && d.id === fromDay.id) ? 'selected' : (isOptional && optMeta && optMeta.day === d.id ? 'selected' : '')}>D${d.id} — ${esc(shortTitle(d.title))}</option>`).join('');
   row.innerHTML = `
@@ -1767,6 +1852,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
         ? `<select class="restore-to-day">${dayOptions}</select><button class="restore-btn">+ Add</button>`
         : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Unassigned</option></select>
            ${doneBtnHtml(s)}
+           ${hideBtnHtml(s)}
            <button class="bin-btn" title="Remove to bin">🗑</button>`}
       <span class="drag-handle" title="Drag to another day or position" role="button" tabindex="0">⠿</span>
     </div>`;
@@ -1817,6 +1903,10 @@ function allStopRow(id, fromDay, isOptional, optMeta){
       renderAllStops();
     });
     wireDoneBtn(row, id, null);
+    // Switching back to Day by Day only unhides the panel, so the day (and its
+    // map) has to be rebuilt here or it would show the pin until something
+    // else redrew it.
+    wireHideBtn(row, id, () => renderDayPanel());
     row.querySelector('.bin-btn').addEventListener('click', () => { removeToBin(fromDay, id); renderAllStops(); });
   }
   return row;
@@ -2029,11 +2119,13 @@ function renderDayMapsOverlay(plan, opts){
       scheds[i].rows.forEach(r => {
         const s = r.stop;
         if(s.lat == null) return;
-        num += 1;
-        L.marker([s.lat, s.lng], { icon: L.divIcon({
-          className: '', html: '<div class="map-pin ap-pin"><span>' + num + '</span></div>',
-          iconSize: [20, 20], iconAnchor: [10, 18]
-        })}).addTo(m);
+        num += 1;   // counted whether or not it's drawn, so the numbers hold
+        if(!s.hidden){
+          L.marker([s.lat, s.lng], { icon: L.divIcon({
+            className: '', html: '<div class="map-pin ap-pin"><span>' + num + '</span></div>',
+            iconSize: [20, 20], iconAnchor: [10, 18]
+          })}).addTo(m);
+        }
         pts.push([s.lat, s.lng]);
       });
       if(endH){
@@ -3110,6 +3202,7 @@ export function wireStaticHandlers(){
   on('modal-overlay', 'click', (e) => { if(e.target.id === 'modal-overlay') closeModal(); });
   on('modal-notes', 'input', saveNotesDebounced);
   on('modal-done', 'click', toggleModalDone);
+  on('modal-hide', 'click', toggleModalHide);
   on('modal-edit', 'click', () => {
     const id = modalStopId;
     closeModal();

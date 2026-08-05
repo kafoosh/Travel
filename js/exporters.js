@@ -46,7 +46,10 @@ function xmlEsc(s){
    `num` is the point's number in the itinerary itself (matching the numbered
    pins on the day map): a running count over located stops, `Nb` for a hike's
    end point, null for the hotel bookends, which the day never numbers. It is
-   a property of the plan, not of any selection made from it. */
+   a property of the plan, not of any selection made from it. `hidden` marks a
+   stop the user has taken off the map — still a point of the day (it keeps its
+   number, and the route runs through it), so callers that draw pins skip it
+   while callers that measure or route do not. */
 export function dayMapPoints(trip, day){
   const sched = computeSchedule(trip, day);
   const pts = [];
@@ -58,9 +61,9 @@ export function dayMapPoints(trip, day){
     const s = r.stop;
     if(s.lat == null) return;
     n += 1;
-    pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start), num: String(n) });
+    pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start), num: String(n), hidden: !!s.hidden });
     if(AB_CATS.includes(s.cat) && s.endLat != null)
-      pts.push({ lat: s.endLat, lng: s.endLng, label: endLabel(s), cat: s.cat, when: '', num: n + 'b' });
+      pts.push({ lat: s.endLat, lng: s.endLng, label: endLabel(s), cat: s.cat, when: '', num: n + 'b', hidden: !!s.hidden });
   });
   if(endHotel && endHotel.lat != null && pts.length)
     pts.push({ lat: endHotel.lat, lng: endHotel.lng, label: endHotel.name, cat: 'hotel', when: 'End of the day', num: null });
@@ -111,6 +114,9 @@ export function tripKml(trip){
       const s = r.stop;
       if(s.lat == null) return;
       n += 1;
+      // Hidden from the map here too — the numbering runs on, and the day's
+      // route line still passes through it.
+      if(s.hidden) return;
       const desc = [formatTime(r.start) + ' · ' + s.dur + ' min', s.desc, s.notes ? 'Notes: ' + s.notes : '']
         .filter(Boolean).join('\n');
       L.push(placemark(n + '. ' + s.name, desc, s.lat, s.lng));
