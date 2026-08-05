@@ -176,9 +176,11 @@
   <div class="modal-box">
     <!-- Save rides at the top with the close button rather than at the foot of
          a long form: on a phone the form scrolls well past a screen, and the
-         way out shouldn't be one of them. The `form` attribute keeps it a real
-         submit button for the form below it, Enter-to-submit included. -->
-    <div class="modal-topbar">
+         way out shouldn't be one of them. The pair floats over the fields
+         rather than sitting in a bar, which would cost a strip of screen the
+         form needs. The `form` attribute keeps it a real submit button for the
+         form below it, Enter-to-submit included. -->
+    <div class="modal-float-actions">
       <button type="submit" form="add-location-form" class="reset-btn" id="al-submit">Add</button>
       <button class="modal-close" id="add-location-close" aria-label="Close">✕</button>
     </div>
