@@ -111,7 +111,7 @@ function renderHeroHotels(){
   if(!hotels.length){ el.innerHTML = ''; return; }
   el.innerHTML = `
     <button type="button" class="hh-summary" id="hero-hotels-summary" aria-expanded="false" aria-controls="hero-hotels-list">
-      <span>🏨 ${hotels.length} hotel${hotels.length === 1 ? '' : 's'}</span>
+      <span>${hotels.length} hotel${hotels.length === 1 ? '' : 's'}</span>
       <span class="hs-caret" aria-hidden="true">▾</span>
     </button>
     <div class="hh-list" id="hero-hotels-list">${hotels.map(h =>
@@ -345,7 +345,7 @@ function renderDayPanel(){
         ${date ? `<span class="day-date-tag">${formatDayDate(date)}</span>` : ''}
         <span class="day-progress${dayProgressText(day) ? '' : ' hidden'}" id="day-progress" title="Stops ticked off on this day">${dayProgressText(day)}</span>
         <button class="reset-btn" id="edit-day-btn">✎ Edit day</button>
-        <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">🗺 Google Maps</button>
+        <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">Google Maps</button>
         <button class="reset-btn" id="add-location-btn">+ Add location</button>
         <button class="reset-btn" id="optimize-order" title="Reorder this day's stops to minimise travel time">✨ Optimize route</button>
       </div>
@@ -470,6 +470,10 @@ const ICON_BIN = svgIcon(
   '<path d="M8 5.6V4.2A1.2 1.2 0 0 1 9.2 3h1.6A1.2 1.2 0 0 1 12 4.2v1.4"/>' +
   '<path d="M5.6 5.6l.7 9.8A1.6 1.6 0 0 0 7.9 17h4.2a1.6 1.6 0 0 0 1.6-1.6l.7-9.8"/>' +
   '<path d="M8.6 8.6v5.2M11.4 8.6v5.2"/>');
+/* The pencil joins them so the detail modal's four actions share one hand. */
+const ICON_PENCIL = svgIcon(
+  '<path d="M13.4 3.6a1.7 1.7 0 0 1 2.4 2.4L7.3 14.5 4 15.5l1-3.3Z"/>' +
+  '<path d="M12.2 4.8 14.6 7.2"/>');
 
 /* =========================================================
    DONE TICKS
@@ -1268,7 +1272,16 @@ function openModal(stopId, row){
   $('modal-notes').value = stop.notes || '';
   paintModalDone(stop);
   paintModalHide(stop);
-  $('modal-bin').innerHTML = ICON_BIN + '<span>Move to bin</span>';
+  // One word and an icon each: four actions fit on one line, phone included,
+  // and the full phrasing lives on the tooltip and the accessible name.
+  const edit = $('modal-edit');
+  edit.innerHTML = ICON_PENCIL + '<span>Edit</span>';
+  edit.title = 'Edit location';
+  edit.setAttribute('aria-label', 'Edit location');
+  const bin = $('modal-bin');
+  bin.innerHTML = ICON_BIN + '<span>Bin</span>';
+  bin.title = 'Move to bin';
+  bin.setAttribute('aria-label', 'Move to bin');
 
   $('modal-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
@@ -1279,8 +1292,10 @@ function paintModalDone(stop){
   const btn = $('modal-done');
   if(!btn) return;
   const on = !!stop.done;
-  btn.innerHTML = ICON_CHECK + '<span>' + (on ? 'Done — untick' : 'Mark as done') + '</span>';
+  btn.innerHTML = ICON_CHECK + '<span>Done</span>';
   btn.setAttribute('aria-pressed', String(on));
+  btn.setAttribute('aria-label', on ? 'Done — click to untick' : 'Mark as done');
+  btn.title = on ? 'Done — click to untick' : 'Mark as done';
   btn.classList.toggle('on', on);
 }
 
@@ -1298,11 +1313,14 @@ function paintModalHide(stop){
   const btn = $('modal-hide');
   if(!btn) return;
   const on = !!stop.hidden;
-  btn.innerHTML = (on ? ICON_EYE_OFF : ICON_EYE) + '<span>' + (on ? 'Show on map' : 'Hide from map') + '</span>';
+  btn.innerHTML = (on ? ICON_EYE_OFF : ICON_EYE) + '<span>' + (on ? 'Show' : 'Hide') + '</span>';
   btn.setAttribute('aria-pressed', String(on));
+  btn.setAttribute('aria-label', on ? 'Show on map' : 'Hide from map');
   btn.classList.toggle('on', on);
   btn.disabled = stop.lat == null;   // nothing to hide: it was never on the map
-  btn.title = stop.lat == null ? 'No coordinates — this stop isn’t on the map anyway' : '';
+  btn.title = stop.lat == null
+    ? 'No coordinates — this stop isn’t on the map anyway'
+    : (on ? 'Show on map' : 'Hide from map');
 }
 
 function toggleModalHide(){
