@@ -28,8 +28,8 @@
      the same forgiving behaviour as the site.
    ========================================================= */
 
-import { esc, formatTime, formatDur, formatDayDate, dayDate, parseTime, slugify } from './util.js';
-import { CAT_ICONS, MODE_ICONS, DAY_COLORS, serializeTrip } from './format.js';
+import { esc, formatTime, formatDur, formatDayDate, dayDate, parseTime, slugify, haversineKm } from './util.js';
+import { CAT_ICONS, MODE_ICONS, DAY_COLORS, AB_CATS, serializeTrip } from './format.js';
 import { computeSchedule, departPoint } from './schedule.js';
 import { dayMapPoints } from './exporters.js';
 import { imageCandidates } from './img.js';
@@ -139,8 +139,10 @@ function daySegments(sched){
     const here = { lat: s.lat, lng: s.lng };
     if(prev) segs.push({ from: prev, to: here, path: row.travelPath, mode: row.travelMode });
     const dep = departPoint(s);
-    if(row.hikeLeg && dep && (dep.lat !== s.lat || dep.lng !== s.lng))
-      segs.push({ from: here, to: dep, path: row.hikeLeg.path, mode: 'walk' });
+    // The stop's own point-to-point movement: a hike's routed walk, or a
+    // ride's straight line between its stations.
+    if(dep && (dep.lat !== s.lat || dep.lng !== s.lng))
+      segs.push({ from: here, to: dep, path: row.hikeLeg ? row.hikeLeg.path : null, mode: row.hikeLeg ? 'walk' : null });
     if(dep) prev = dep;
   });
 
@@ -285,7 +287,7 @@ function stopCardHtml(stop, opts){
     ${stop.notes ? `<p class="notes">📝 ${esc(stop.notes)}</p>` : ''}
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     ${coordsHtml(stop.lat, stop.lng, stop.name)}
-    ${stop.cat === 'hike' && stop.endLat != null ? coordsHtml(stop.endLat, stop.endLng, stop.name + ' (end)', 'end') : ''}
+    ${AB_CATS.includes(stop.cat) && stop.endLat != null ? coordsHtml(stop.endLat, stop.endLng, stop.name + (stop.cat === 'hike' ? ' (end)' : ' (arrival)'), 'end') : ''}
   </article>`;
 }
 
@@ -319,11 +321,13 @@ function dayHtml(trip, day, idx, opts){
       body.push(`<p class="leg wait">⏳ ${row.waitBefore} min spare before the fixed start</p>`);
     const s = row.stop;
     if(s.lat != null) num += 1;
+    const isRide = AB_CATS.includes(s.cat) && s.cat !== 'hike' && s.endLat != null && s.lat != null;
     const chips = [
       formatDur(s.dur),
       s.fixedStart ? '⏰ fixed ' + s.fixedStart : null,
       row.late > 0 ? '⚠ ' + row.late + ' min late' : null,
       row.hikeLeg ? '🥾 ' + n1(row.hikeLeg.distKm || 0) + ' km walk to the end point' : null,
+      isRide ? (CAT_ICONS[s.cat] || '🚄') + ' ~' + Math.round(haversineKm(s.lat, s.lng, s.endLat, s.endLng)) + ' km leg — the day continues from where it arrives' : null,
     ].filter(Boolean).map(c => `<span class="chip">${esc(c)}</span>`).join('');
     body.push(stopCardHtml(s, {
       photos: opts.photos,

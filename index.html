@@ -172,12 +172,15 @@
           <p class="al-hint">Right-click a spot on any online map and copy the coordinates. Without them the stop still works, but won't appear on the map or in travel times.</p>
         </div>
         <div id="al-end-wrap" class="hidden">
-          <label>Hike ends at (search)<input type="text" id="al-end-search" placeholder="Search the end point…"></label>
+          <label>Ends at (search)<input type="text" id="al-end-search" placeholder="Search the arrival station / end point…"></label>
           <div class="al-coords">
             <label>End latitude<input type="text" id="al-endlat"></label>
             <label>End longitude<input type="text" id="al-endlng"></label>
           </div>
-          <p class="al-hint">A hike starts at the main location and ends here — the next stop's travel is measured from the end point, and the hike counts toward the day's walked distance.</p>
+          <p class="al-hint">A hike, train, flight or boat can run point-to-point: the main location is where it departs
+            (trailhead, station, airport), this is where it arrives. The commute to the departure point is computed like
+            any other leg, the duration is the leg itself, and the day continues from here. Leave blank when only one
+            point matters (a loop walk, the flight in on arrival day).</p>
         </div>
         <label>Short description<textarea id="al-desc" rows="2"></textarea></label>
         <label>Longer history/trivia (shown in the popup)<textarea id="al-detail" rows="3"></textarea></label>

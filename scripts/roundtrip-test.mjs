@@ -12,6 +12,7 @@ globalThis.localStorage = {
 const { parseTrip, serializeTrip, parseCsv, importText, blankTrip } = await import('../js/format.js');
 const { normalizeTrip } = await import('../js/state.js');
 const { optimizeDayOrder, autoPlanOrders } = await import('../js/optimize.js');
+const { computeSchedule, departPoint } = await import('../js/schedule.js');
 const { readFileSync } = await import('node:fs');
 const { dirname, join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
@@ -36,7 +37,11 @@ check('3 hotels', trip.hotels.length === 3);
 check('no warnings on demo', warnings.length === 0, warnings.join('; '));
 check('day 2 starts and ends at hotel h1', trip.days[1].startHotelId === 'h1' && trip.days[1].endHotelId === 'h1');
 check('arrival day: no start hotel, ends at h1', trip.days[0].startHotelId === null && trip.days[0].endHotelId === 'h1');
-check('hotel-change day: ends at the Venice hotel', trip.days[5].startHotelId === null && trip.days[5].endHotelId === 'h2');
+check('hotel-change day: Rome hotel to Venice hotel', trip.days[5].startHotelId === 'h1' && trip.days[5].endHotelId === 'h2');
+check('the train is a point-to-point leg (Termini → S. Lucia)', (() => {
+  const train = Object.values(trip.stops).find(s => s.name === 'Train — Rome to Venice');
+  return train && train.cat === 'travel' && train.lat === 41.901 && train.endLat === 45.4413 && train.endLng === 12.321;
+})());
 check('boat hotel preserved', trip.hotels.find(h => h.name.includes('JW')).mode === 'boat');
 const colosseum = Object.values(trip.stops).find(s => s.name === 'Colosseum');
 check('Colosseum fields', colosseum && colosseum.dur === 105 && colosseum.cat === 'landmark' && colosseum.tags.length === 1);
@@ -213,8 +218,12 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     const s = fresh.stops[id];
     if(s && ['travel','boat','hotel','flight'].includes(s.cat)) anchorDayBefore[id] = d.id;
   }));
+  // A stop's city is judged by its DEPART point — a Rome → Venice train
+  // deposits the day in Venice, so it counts as Venice, not as its
+  // departure platform.
   const loads = fresh.days.map(d => {
-    const cities = new Set(fo[d.id].map(id => fresh.stops[id]).filter(s => s && s.lat != null).map(s => s.lat > 44 ? 'V' : 'R'));
+    const cities = new Set(fo[d.id].map(id => fresh.stops[id]).filter(s => s && s.lat != null)
+      .map(s => (departPoint(s).lat > 44 ? 'V' : 'R')));
     if(cities.size > 1) crossCity++;
     fo[d.id].forEach(id => { if(anchorDayBefore[id] && anchorDayBefore[id] !== d.id) anchorMoved++; });
     return fo[d.id].reduce((n, id) => n + ((fresh.stops[id] || {}).dur || 0), 0);
@@ -277,6 +286,23 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       const picked = [numbered[4], numbered[5]];   // "just these two" case
       return picked[0].num === '4' && picked[1].num === '5';
     })());
+
+    /* --- 5b. point-to-point travel legs (the Rome → Venice transfer day) --- */
+    console.log('point-to-point legs:');
+    const d6 = t.days[5];
+    const sched6 = computeSchedule(t, d6);
+    check('commute runs hotel → departure station, not across the country',
+      !!sched6.leadTransfer && sched6.leadTransfer.minutes < 60,
+      '~' + (sched6.leadTransfer ? sched6.leadTransfer.minutes : '—') + ' min');
+    check('the ride is the stop itself (first row is the train)', sched6.rows[0].stop.cat === 'travel');
+    check('the day continues from the arrival station', sched6.rows[1].travelBefore < 30,
+      '~' + sched6.rows[1].travelBefore + ' min to check-in');
+    check('the ride counts toward other-modes distance', sched6.otherKm > 300, sched6.otherKm.toFixed(0) + ' km');
+    const pts6 = dayMapPoints(t, d6);
+    check('day points include the arrival station as "1b"',
+      pts6.some(p => p.num === '1b' && / \(arrival\)$/.test(p.label)));
+    check('day 6 runs hotel → station → arrival → … → hotel',
+      pts6[0].cat === 'hotel' && pts6[1].num === '1' && pts6[pts6.length - 1].cat === 'hotel');
 
     /* --- 6. offline export --- */
     import('../js/offline.js').then(({ buildOfflineHtml, offlineFileName, photoUrls }) => {
