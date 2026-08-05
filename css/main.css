@@ -749,6 +749,11 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 }
 .al-coords{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .al-hint{ font-size:12px; color:var(--ink-soft); margin:-4px 0 0; }
+/* The coordinate and end-point folds are groups inside the form, so they
+   repeat its column: without it their children fall back to block flow,
+   where .al-hint's -4px pulls the paragraph flush against the lat/long
+   boxes instead of sitting the same 8px below them as every other hint. */
+#al-coords-wrap, #al-end-wrap{ display:flex; flex-direction:column; gap:12px; }
 
 /* ---------- place-search suggestions ---------- */
 .ac-list{
@@ -1412,7 +1417,8 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   .add-location-form input,
   .add-location-form select,
   .add-location-form textarea{ min-height:44px; font-size:16px; } /* 16px avoids iOS zoom-on-focus */
-  .add-location-form button[type="submit"]{ min-height:48px; font-size:14px; }
+  .modal-topbar{ padding:10px 10px 9px; border-radius:16px 16px 0 0; }
+  .modal-topbar #al-submit{ min-height:44px; font-size:13px; padding:0 20px; }
 
   .group-controls{ gap:8px; }
   .group-label{ font-size:13px; }
@@ -1884,6 +1890,28 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   z-index:2;
 }
 .modal-close:hover{background:var(--ink);}
+/* A sticky header for the forms long enough to scroll: the box is the
+   scroller, so a sticky child of it holds at the top while the fields run
+   underneath. The close button drops its absolute placement and simply sits
+   in the row. */
+.modal-topbar{
+  position:sticky; top:0; z-index:3;
+  display:flex; align-items:center; justify-content:flex-end; gap:8px;
+  padding:12px 12px 10px;
+  background:var(--paper-card);
+  border-bottom:1px solid var(--line);
+  border-radius:14px 14px 0 0;
+}
+.modal-topbar .modal-close{ position:static; flex:none; }
+/* The primary action, and now the smallest thing in the bar — filled so it
+   doesn't read as another quiet outline next to the way out. */
+#al-submit{
+  background:var(--accent); border-color:var(--accent); color:#fff;
+  padding:7px 18px;
+}
+#al-submit:hover{ background:var(--accent-dark); border-color:var(--accent-dark); color:#fff; }
+/* The bar supplies the top inset, so the heading doesn't need a second one. */
+.modal-topbar + .modal-content{ padding-top:16px; }
 .modal-photo{
   width:100%;
   height:260px;

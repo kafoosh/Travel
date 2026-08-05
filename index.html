@@ -174,7 +174,14 @@
 <!-- Add / edit location modal -->
 <div class="modal-overlay" id="add-location-overlay">
   <div class="modal-box">
-    <button class="modal-close" id="add-location-close" aria-label="Close">✕</button>
+    <!-- Save rides at the top with the close button rather than at the foot of
+         a long form: on a phone the form scrolls well past a screen, and the
+         way out shouldn't be one of them. The `form` attribute keeps it a real
+         submit button for the form below it, Enter-to-submit included. -->
+    <div class="modal-topbar">
+      <button type="submit" form="add-location-form" class="reset-btn" id="al-submit">Add</button>
+      <button class="modal-close" id="add-location-close" aria-label="Close">✕</button>
+    </div>
     <div class="modal-content">
       <h3 class="modal-title" id="al-heading">Add a location</h3>
       <form id="add-location-form" class="add-location-form">
@@ -209,7 +216,6 @@
         <label>Photo URL<input type="text" id="al-img" placeholder="https://…"></label>
         <p class="al-hint">A direct link to an image file. A Wikimedia Commons <i>File:</i> page link works too — it's converted automatically. If a photo can't be loaded, the stop just shows its category icon.</p>
         <label>Tags (comma-separated)<input type="text" id="al-tags" placeholder="e.g. rainy-day, with kids"></label>
-        <button type="submit" class="reset-btn" id="al-submit">Add location</button>
       </form>
     </div>
   </div>

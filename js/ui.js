@@ -1393,7 +1393,10 @@ export function openLocationForm(editStopId, defaultDayId){
   $('add-location-form').reset();
   $('al-editing').value = editStopId || '';
   $('al-heading').textContent = editStopId ? 'Edit location' : 'Add a location';
-  $('al-submit').textContent = editStopId ? 'Save changes' : 'Add location';
+  // One word in the top bar; the heading beside it says what's being saved.
+  const submit = $('al-submit');
+  submit.textContent = editStopId ? 'Save' : 'Add';
+  submit.title = editStopId ? 'Save changes' : 'Add location';
 
   if(editStopId){
     const s = trip().stops[editStopId];
