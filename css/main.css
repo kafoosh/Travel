@@ -423,8 +423,9 @@ h1.title:hover{color:var(--accent-dark);}
   border-bottom:2px dashed var(--line);
   background:var(--accent-tint);
 }
-/* Chips live in a wrapper so mobile can fold them behind a one-line summary;
-   on desktop the wrapper is invisible layout-wise and the summary is hidden. */
+/* The controls live in a wrapper so mobile can fold them behind a one-line
+   summary; on desktop the wrapper is invisible layout-wise and the summary is
+   hidden. */
 .hotel-summary{ display:none; }
 .hotel-opts{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; flex:1; }
 .hotel-toggle-label{
@@ -434,21 +435,43 @@ h1.title:hover{color:var(--accent-dark);}
   letter-spacing:.06em;
   color:var(--accent-dark);
 }
-.hotel-opt{
+/* Start / End hotel dropdowns dressed as chips: a tag segment naming the end
+   of the day, and the hotel select beside it, in one pill. Each end picks its
+   hotel on its own — same hotel in both is the normal based-here day. */
+.hotel-pick{
+  display:inline-flex;
+  align-items:stretch;
+  border:1px solid var(--accent);
+  border-radius:999px;
+  background:var(--card);
+  overflow:hidden;
+}
+.hotel-pick .hp-tag{
+  display:flex;
+  align-items:center;
+  padding:5px 9px 5px 13px;
+  font-family:'IBM Plex Mono', monospace;
+  font-size:10.5px;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--accent-dark);
+  background:var(--accent-tint);
+  border-right:1px solid var(--accent);
+}
+.hotel-pick select{
+  border:none;
+  background:transparent;
+  color:var(--ink);
   font-family:'IBM Plex Mono', monospace;
   font-size:12px;
-  background:var(--card);
-  border:1px solid var(--accent);
-  color:var(--accent-dark);
-  padding:6px 12px;
-  border-radius:999px;
+  padding:5px 10px 5px 9px;
+  max-width:230px;
+  min-width:0;
+  text-overflow:ellipsis;
   cursor:pointer;
 }
-.hotel-opt.active{background:var(--accent);color:#fff;}
-.hotel-opt:hover:not(.active){background:var(--accent-tint);}
-/* The start≠end chip: a doorway to the day editor, not a hotel itself. */
-.hotel-opt.split-opt{border-style:dashed;}
-.hotel-opt.split-opt.active{border-style:solid;}
+.hotel-pick:hover{ background:var(--accent-tint); }
+.hotel-pick:focus-within{ outline:2px solid var(--accent); outline-offset:1px; }
 .map-pin.hotel-pin{border-radius:6px;transform:none;background:var(--gold) !important;}
 .map-pin.hotel-pin span{transform:none;}
 
@@ -1175,7 +1198,8 @@ h1.title:hover{color:var(--accent-dark);}
   .hotel-opts{ display:none; }
   .hotel-toggle.open .hotel-opts{ display:flex; padding:2px 0 8px; }
   .hotel-opts .hotel-toggle-label{ display:none; }  /* the summary line already says it */
-  .hotel-opt{ min-height:44px; }
+  .hotel-pick{ min-height:44px; width:100%; }       /* one full-width row per end */
+  .hotel-pick select{ flex:1; max-width:none; }
 
   .schedule{ padding:12px 12px 18px; }
   .mappanel{ padding:12px 12px 18px; }
