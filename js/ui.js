@@ -268,18 +268,20 @@ function renderDayPanel(){
 
   let hotelBarHtml = '';
   if(trip().hotels.length){
-    // On mobile the bar rests as a one-line summary (the chips take real
-    // space); tapping it unfolds the choices. Desktop shows chips directly —
-    // the summary button is display:none there.
-    // A chip is the whole day's base: clicking one starts AND ends the day
-    // there. A day whose two ends differ (arrival, departure, hotel change)
-    // shows as one combined "A → B" chip; either end is changed in Edit day.
+    // On mobile the bar rests as a one-line summary; tapping it unfolds the
+    // controls. Desktop shows them directly — the summary button is
+    // display:none there.
+    // Each end of the day picks its own hotel: the same hotel in both is the
+    // normal based-here day, and any other pair (none → hotel, hotel → none,
+    // A → B) is an arrival, a departure, or a hotel-change day.
     const startH = trip().hotels.find(h => h.id === day.startHotelId) || null;
     const endH = trip().hotels.find(h => h.id === day.endHotelId) || null;
     const split = (day.startHotelId || null) !== (day.endHotelId || null);
     const summary = split
       ? (startH ? esc(startH.name) : 'No hotel') + ' → ' + (endH ? esc(endH.name) : 'no hotel')
       : (startH ? esc(startH.name) : 'No hotel');
+    const options = (sel) => `<option value=""${sel ? '' : ' selected'}>No hotel</option>` +
+      trip().hotels.map(h => `<option value="${esc(h.id)}"${sel === h.id ? ' selected' : ''}>${esc(h.name)}</option>`).join('');
     hotelBarHtml = `
     <div class="hotel-toggle" id="hotel-toggle">
       <button type="button" class="hotel-summary" id="hotel-summary" aria-expanded="false">
@@ -289,13 +291,14 @@ function renderDayPanel(){
       </button>
       <div class="hotel-opts">
         <span class="hotel-toggle-label">Staying at:</span>
-        <button class="hotel-opt ${!split && !day.startHotelId ? 'active' : ''}" data-hotel="">No hotel</button>
-        ${trip().hotels.map(h =>
-          `<button class="hotel-opt ${!split && day.startHotelId === h.id ? 'active' : ''}" data-hotel="${esc(h.id)}" title="Start and end this day at ${esc(h.name)}">${esc(h.name)}</button>`
-        ).join('')}
-        <button class="hotel-opt split-opt ${split ? 'active' : ''}" id="hotel-split-btn" title="${split
-          ? 'This day starts and ends at different places — click to change either end'
-          : 'Start and end the day at different places — an arrival, a departure, or a hotel-change day'}">${split ? summary : 'Start ≠ end…'}</button>
+        <label class="hotel-pick" title="Where the day begins — No hotel on a day that starts mid-journey (an arrival)">
+          <span class="hp-tag">Start</span>
+          <select id="hotel-start-select" aria-label="Hotel the day starts from">${options(day.startHotelId)}</select>
+        </label>
+        <label class="hotel-pick" title="Where this night is spent — No hotel on a departure day">
+          <span class="hp-tag">End</span>
+          <select id="hotel-end-select" aria-label="Hotel the day ends at">${options(day.endHotelId)}</select>
+        </label>
       </div>
     </div>`;
   }
@@ -370,18 +373,19 @@ function renderDayPanel(){
     const open = $('hotel-toggle').classList.toggle('open');
     hotelSummary.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
-  panel.querySelectorAll('.hotel-opt[data-hotel]').forEach(btn => {
-    btn.addEventListener('click', () => {
+  const wireHotelPick = (id, field) => {
+    const sel = $(id);
+    if(!sel) return;
+    sel.addEventListener('change', () => {
       pushUndo();
-      day.startHotelId = btn.dataset.hotel || null;
-      day.endHotelId = btn.dataset.hotel || null;
+      day[field] = sel.value || null;
       saveState();
       renderDayPanel();
       updateUndoButton();
     });
-  });
-  const splitBtn = $('hotel-split-btn');
-  if(splitBtn) splitBtn.addEventListener('click', () => openDayEdit(state.currentDayIndex));
+  };
+  wireHotelPick('hotel-start-select', 'startHotelId');
+  wireHotelPick('hotel-end-select', 'endHotelId');
 
   renderUnassignedTray($('day-unassigned'), day.id);
   renderScheduleList(day, sched);
