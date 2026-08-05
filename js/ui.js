@@ -45,6 +45,10 @@ let mapLayerGroup = null;
 let lastMapDayId = null;
 let mapFitPts = null;
 let mapFitPending = false;
+/* The map normally keeps the user's pan and zoom when the same day redraws.
+   Hiding or showing something changes what the map is OF, so the next draw
+   has to refit — set from the eye toggles, consumed by renderMap. */
+let mapRefitNext = false;
 let modalStopId = null;
 let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
 let promptMode = null;    // sticky mode radio choice
@@ -291,14 +295,16 @@ function renderDayPanel(){
       </button>
       <div class="hotel-opts">
         <span class="hotel-toggle-label">Staying at:</span>
-        <label class="hotel-pick" title="Where the day begins — No hotel on a day that starts mid-journey (an arrival)">
+        <div class="hotel-pick" title="Where the day begins — No hotel on a day that starts mid-journey (an arrival)">
           <span class="hp-tag">Start</span>
           <select id="hotel-start-select" aria-label="Hotel the day starts from">${options(day.startHotelId)}</select>
-        </label>
-        <label class="hotel-pick" title="Where this night is spent — No hotel on a departure day">
+          ${bookendEyeHtml('start', day, !!day.startHotelId)}
+        </div>
+        <div class="hotel-pick" title="Where this night is spent — No hotel on a departure day">
           <span class="hp-tag">End</span>
           <select id="hotel-end-select" aria-label="Hotel the day ends at">${options(day.endHotelId)}</select>
-        </label>
+          ${bookendEyeHtml('end', day, !!day.endHotelId)}
+        </div>
       </div>
     </div>`;
   }
@@ -386,11 +392,55 @@ function renderDayPanel(){
   };
   wireHotelPick('hotel-start-select', 'startHotelId');
   wireHotelPick('hotel-end-select', 'endHotelId');
+  const wireBookendEye = (id, field) => {
+    const btn = $(id);
+    if(!btn) return;
+    btn.addEventListener('click', () => {
+      pushUndo();
+      day[field] = !day[field];
+      mapRefitNext = true;
+      saveState();
+      renderDayPanel();
+      updateUndoButton();
+    });
+  };
+  wireBookendEye('hotel-start-eye', 'hideStart');
+  wireBookendEye('hotel-end-eye', 'hideEnd');
 
   renderUnassignedTray($('day-unassigned'), day.id);
   renderScheduleList(day, sched);
   renderMap(day, sched);
 }
+
+/* =========================================================
+   CONTROL ICONS
+
+   The three buttons every stop carries — tick it off, take it
+   off the map, send it to the bin — are drawn rather than
+   typed. An emoji is a different picture on every platform
+   (the eye in particular arrives as a full-colour eyeball on
+   some, a flat outline on others, and nothing at all where the
+   font is missing), and it never quite shares a baseline with
+   its neighbours. These are one shape everywhere, sized in em
+   so they follow the button's font-size, and stroked in
+   currentColor so a filled "on" state inverts them for free.
+   ========================================================= */
+const svgIcon = (paths, extra = '') =>
+  '<svg class="btn-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false" ' +
+  'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+  paths + extra + '</svg>';
+
+const ICON_CHECK = svgIcon('<path d="M4.2 10.6 8 14.3 15.8 5.9"/>');
+const EYE_OUTLINE = '<path d="M1.9 10S5 4.9 10 4.9 18.1 10 18.1 10 15 15.1 10 15.1 1.9 10 1.9 10Z"/>' +
+  '<circle cx="10" cy="10" r="2.3"/>';
+const ICON_EYE = svgIcon(EYE_OUTLINE);
+/* Hidden reads as the same eye, struck through — the slash is the state. */
+const ICON_EYE_OFF = svgIcon(EYE_OUTLINE, '<path d="M3.6 3.6 16.4 16.4"/>');
+const ICON_BIN = svgIcon(
+  '<path d="M3.6 5.6h12.8"/>' +
+  '<path d="M8 5.6V4.2A1.2 1.2 0 0 1 9.2 3h1.6A1.2 1.2 0 0 1 12 4.2v1.4"/>' +
+  '<path d="M5.6 5.6l.7 9.8A1.6 1.6 0 0 0 7.9 17h4.2a1.6 1.6 0 0 0 1.6-1.6l.7-9.8"/>' +
+  '<path d="M8.6 8.6v5.2M11.4 8.6v5.2"/>');
 
 /* =========================================================
    DONE TICKS
@@ -409,7 +459,7 @@ function doneBtnHtml(stop){
   const on = !!stop.done;
   return `<button class="done-btn" type="button" aria-pressed="${on}" data-done-id="${esc(stop.id)}"` +
     ` title="${on ? 'Done — click to untick' : 'Mark as done'}"` +
-    ` aria-label="${on ? 'Mark not done' : 'Mark done'}: ${esc(stop.name)}">✓</button>`;
+    ` aria-label="${on ? 'Mark not done' : 'Mark done'}: ${esc(stop.name)}">${ICON_CHECK}</button>`;
 }
 
 /* Wire the button inside `root` (a card or row). The card greys out in
@@ -456,7 +506,19 @@ function hideBtnHtml(stop){
   const on = !!stop.hidden;
   return `<button class="hide-btn${on ? ' off' : ''}" type="button" aria-pressed="${on}" data-hide-id="${esc(stop.id)}"` +
     ` title="${on ? 'Hidden from the map — click to show' : 'Hide from the map'}"` +
-    ` aria-label="${on ? 'Show on map' : 'Hide from map'}: ${esc(stop.name)}">👁</button>`;
+    ` aria-label="${on ? 'Show on map' : 'Hide from map'}: ${esc(stop.name)}">${on ? ICON_EYE_OFF : ICON_EYE}</button>`;
+}
+
+/* The same eye for a day's start or end point. The hotel is a point of the
+   day like any other: on a transfer day, hiding the hotel you checked out of
+   is what finally lets the map fit on the city you arrive in. */
+function bookendEyeHtml(which, day, hasHotel){
+  const on = which === 'start' ? !!day.hideStart : !!day.hideEnd;
+  const label = which === 'start' ? 'the day’s start point' : 'the day’s end point';
+  if(!hasHotel) return `<button class="hide-btn hp-eye" type="button" disabled title="No hotel at this end — nothing on the map to hide">${ICON_EYE}</button>`;
+  return `<button class="hide-btn hp-eye${on ? ' off' : ''}" type="button" id="hotel-${which}-eye" aria-pressed="${on}"` +
+    ` title="${on ? 'Hidden from the map — click to show' : 'Hide ' + label + ' from the map'}"` +
+    ` aria-label="${on ? 'Show ' : 'Hide '}${label} on map">${on ? ICON_EYE_OFF : ICON_EYE}</button>`;
 }
 
 /* Wire the button inside `root` (a card or row). `after` re-renders whatever
@@ -471,10 +533,12 @@ function wireHideBtn(root, id, after){
     if(!s) return;
     pushUndo();
     s.hidden = !s.hidden;
+    mapRefitNext = true;      // the map is about to be of something else
     saveState();
     const card = btn.closest('.stop-card, .bin-row');
     if(card) card.classList.toggle('off-map', s.hidden);
     btn.classList.toggle('off', s.hidden);
+    btn.innerHTML = s.hidden ? ICON_EYE_OFF : ICON_EYE;
     btn.setAttribute('aria-pressed', String(!!s.hidden));
     btn.title = s.hidden ? 'Hidden from the map — click to show' : 'Hide from the map';
     btn.setAttribute('aria-label', (s.hidden ? 'Show on map: ' : 'Hide from map: ') + s.name);
@@ -636,7 +700,7 @@ function renderScheduleList(day, sched){
           </select>
           ${doneBtnHtml(s)}
           ${hideBtnHtml(s)}
-          <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">🗑</button>
+          <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">${ICON_BIN}</button>
         </div>
       </div>
       <div class="stop-controls">
@@ -993,13 +1057,29 @@ function renderMap(day, sched){
     mapLayerGroup.clearLayers();
   }
 
-  const pts = [];        // marker points, in visit order (drives fitBounds)
+  const pts = [];        // drawn points, in visit order (drives fitBounds)
   const segs = [];       // legs between consecutive points: {from, to, path|null}
   let order = 0;
   const startHotel = (sched.startHotel && sched.startHotel.lat != null) ? sched.startHotel : null;
   const endHotel = (sched.endHotel && sched.endHotel.lat != null) ? sched.endHotel : null;
   const sameHotel = !!(startHotel && endHotel && startHotel.id === endHotel.id);
-  let prevPt = null;
+
+  /* Anything hidden leaves the map completely — its pin, the legs at either
+     side of it, and its pull on the bounds. That is the whole point on a
+     transfer day: hide the four-hour train and the hotel you checked out of,
+     and the map drops the line across the country and fits on the city you
+     actually walk around. Legs are drawn only between two points that are both
+     on the map; a hidden stop leaves a gap rather than a straight line
+     pretending to be a route nobody takes.
+
+     Each end of the day hides on its own. When one hotel is both ends there is
+     only one pin, so it stays until both ends are hidden — but the leg out of
+     it and the leg back to it still follow their own end's flag. */
+  const startOn = !day.hideStart, endOn = !day.hideEnd;
+  const startPinOn = !!startHotel && (sameHotel ? (startOn || endOn) : startOn);
+  const endPinOn = !!endHotel && !sameHotel && endOn;
+  let prevPt = null;      // last point of the day so far, drawn or not
+  let prevOn = false;     // …and whether a leg may touch it
 
   const hotelMarker = (h, role) => {
     const hotelIcon = L.divIcon({
@@ -1012,11 +1092,18 @@ function renderMap(day, sched){
       .bindPopup('<b>' + esc(h.name) + '</b><br>' + role);
   };
   if(startHotel){
-    hotelMarker(startHotel, sameHotel ? 'start / end of day' : 'start of the day');
-    pts.push([startHotel.lat, startHotel.lng]);
+    if(startPinOn){
+      // One pin for both ends says so — unless one of those ends is hidden,
+      // and then it is only standing for the other.
+      hotelMarker(startHotel, !sameHotel ? 'start of the day'
+        : startOn && endOn ? 'start / end of day'
+        : startOn ? 'start of the day' : 'end of the day');
+      pts.push([startHotel.lat, startHotel.lng]);
+    }
     prevPt = [startHotel.lat, startHotel.lng];
+    prevOn = startOn;
   }
-  if(endHotel && !sameHotel) hotelMarker(endHotel, 'end of the day');
+  if(endPinOn) hotelMarker(endHotel, 'end of the day');
 
   sched.rows.forEach(row => {
     const s = row.stop;
@@ -1024,7 +1111,8 @@ function renderMap(day, sched){
     // The number is counted before the pin is drawn, so hiding one stop never
     // renumbers the others — the map keeps 1, 2, 4 and the cards still match.
     order += 1;
-    if(!s.hidden){
+    const on = !s.hidden;
+    if(on){
       const icon = L.divIcon({
         className: '',
         // A ticked-off stop keeps its pin and its number — greyed, so the map
@@ -1039,9 +1127,10 @@ function renderMap(day, sched){
     const cur = [s.lat, s.lng];
     // travelPath on a row is the routed geometry of the leg ARRIVING at it
     // (computed in the same sequence computeSchedule walked).
-    if(prevPt) segs.push({ from: prevPt, to: cur, path: row.travelPath });
-    pts.push(cur);
+    if(prevPt && prevOn && on) segs.push({ from: prevPt, to: cur, path: row.travelPath });
+    if(on) pts.push(cur);
     prevPt = cur;
+    prevOn = on;
 
     // Point-to-point stop: draw the leg itself and continue from its end —
     // a hike as its routed walking path, a ride as a straight line between
@@ -1055,22 +1144,25 @@ function renderMap(day, sched){
         iconSize: [26,26],
         iconAnchor: [13,24]
       });
-      // Both ends belong to the one stop: hiding it takes the arrival pin too.
-      if(!s.hidden){
+      // Both ends belong to the one stop, so they hide together — pins, and
+      // the leg between them (the ride across the country, the hike itself).
+      if(on){
         L.marker(end, { icon: endIcon }).addTo(mapLayerGroup)
           .bindPopup('<b>' + esc(s.name) + '</b><br>' + (isHike ? 'hike ends here' : 'arrives here'));
+        segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: isHike });
+        pts.push(end);
       }
-      segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: isHike });
-      pts.push(end);
       prevPt = end;
     }
   });
 
-  if(endHotel && prevPt && sched.trailTransfer){
-    segs.push({ from: prevPt, to: [endHotel.lat, endHotel.lng], path: sched.trailTransfer.path });
-    pts.push([endHotel.lat, endHotel.lng]);
-  } else if(endHotel && !sameHotel){
-    pts.push([endHotel.lat, endHotel.lng]);   // no routed leg yet, but keep the pin in view
+  if(endHotel){
+    const endPt = [endHotel.lat, endHotel.lng];
+    if(prevPt && prevOn && endOn && sched.trailTransfer){
+      segs.push({ from: prevPt, to: endPt, path: sched.trailTransfer.path });
+    }
+    // The pin is in view whether or not a leg reaches it yet.
+    if(endPinOn) pts.push(endPt);
   }
 
   // Read from the panel, not the root: the panel may carry a per-day colour
@@ -1092,7 +1184,8 @@ function renderMap(day, sched){
 
   mapFitPts = boundPts;
   mapFitPending = false;
-  const dayChanged = lastMapDayId !== day.id || !sameContainer;
+  const dayChanged = lastMapDayId !== day.id || !sameContainer || mapRefitNext;
+  mapRefitNext = false;
   lastMapDayId = day.id;
   if(!dayChanged) return;              // same day refreshed: keep the user's pan/zoom
   if(boundPts.length > 1){
@@ -1146,6 +1239,7 @@ function openModal(stopId, row){
   $('modal-notes').value = stop.notes || '';
   paintModalDone(stop);
   paintModalHide(stop);
+  $('modal-bin').innerHTML = ICON_BIN + '<span>Move to bin</span>';
 
   $('modal-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
@@ -1156,7 +1250,7 @@ function paintModalDone(stop){
   const btn = $('modal-done');
   if(!btn) return;
   const on = !!stop.done;
-  btn.textContent = on ? '✓ Done — untick' : '✓ Mark as done';
+  btn.innerHTML = ICON_CHECK + '<span>' + (on ? 'Done — untick' : 'Mark as done') + '</span>';
   btn.setAttribute('aria-pressed', String(on));
   btn.classList.toggle('on', on);
 }
@@ -1175,7 +1269,7 @@ function paintModalHide(stop){
   const btn = $('modal-hide');
   if(!btn) return;
   const on = !!stop.hidden;
-  btn.textContent = on ? '👁 Show on map' : '👁 Hide from map';
+  btn.innerHTML = (on ? ICON_EYE_OFF : ICON_EYE) + '<span>' + (on ? 'Show on map' : 'Hide from map') + '</span>';
   btn.setAttribute('aria-pressed', String(on));
   btn.classList.toggle('on', on);
   btn.disabled = stop.lat == null;   // nothing to hide: it was never on the map
@@ -1187,6 +1281,7 @@ function toggleModalHide(){
   if(!s) return;
   pushUndo();
   s.hidden = !s.hidden;
+  mapRefitNext = true;
   saveState();
   paintModalHide(s);
   updateUndoButton();
@@ -1533,7 +1628,7 @@ function renderOptional(){
       <div class="manage-row">
         <select class="restore-to-day">${dayOptions}</select>
         <button class="restore-btn">+ Add</button>
-        <button class="bin-btn" title="Remove to bin">🗑</button>
+        <button class="bin-btn" title="Remove to bin">${ICON_BIN}</button>
       </div>
     `;
     row.querySelector('.stop-main').style.cursor = 'pointer';
@@ -1552,7 +1647,7 @@ function renderBin(){
   if(!el) return;
   const doneItems = trip().checklist.filter(c => c.done);
   if(state.trip.bin.length === 0 && !doneItems.length){
-    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing in the bin. Remove a stop from any day (the 🗑 button), or tick a checklist item off in Trip Info, and it'll show up here to bring back later.</p>`;
+    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing in the bin. Remove a stop from any day (the bin button on its card), or tick a checklist item off in Trip Info, and it'll show up here to bring back later.</p>`;
     return;
   }
   el.innerHTML = '';
@@ -1853,7 +1948,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
         : `<select class="move-to-day"><option value="">Move to…</option>${trip().days.filter(d => d.id !== fromDay.id).map(d => `<option value="${d.id}">D${d.id} · ${esc(shortTitle(d.title))}</option>`).join('')}<option value="optional">→ Unassigned</option></select>
            ${doneBtnHtml(s)}
            ${hideBtnHtml(s)}
-           <button class="bin-btn" title="Remove to bin">🗑</button>`}
+           <button class="bin-btn" title="Remove to bin">${ICON_BIN}</button>`}
       <span class="drag-handle" title="Drag to another day or position" role="button" tabindex="0">⠿</span>
     </div>`;
   row.dataset.id = id;
@@ -2107,14 +2202,22 @@ function renderDayMapsOverlay(plan, opts){
       const dayAccent = getComputedStyle(mapEl).getPropertyValue('--accent').trim() || accent;
       const m = L.map(elId, { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(m);
-      const pts = [];
       const hotelPin = (h) => L.marker([h.lat, h.lng], { icon: L.divIcon({
         className: '', html: '<div class="map-pin hotel-pin ap-pin"><span>' + (h.mode === 'boat' ? '🚤' : '🏨') + '</span></div>',
         iconSize: [20, 20], iconAnchor: [10, 10]
       })}).addTo(m);
       const startH = scheds[i].startHotel && scheds[i].startHotel.lat != null ? scheds[i].startHotel : null;
       const endH = scheds[i].endHotel && scheds[i].endHotel.lat != null ? scheds[i].endHotel : null;
-      if(startH){ hotelPin(startH); pts.push([startH.lat, startH.lng]); }
+      const sameH = !!(startH && endH && startH.id === endH.id);
+      const startOn = !day.hideStart, endOn = !day.hideEnd;
+      // Same rule as the day map: hidden points are off this one too, and the
+      // dashed route breaks where one was, instead of leaping over it.
+      const runs = [[]];
+      const add = (pt, on) => { if(on) runs[runs.length - 1].push(pt); else runs.push([]); };
+      if(startH){
+        if(sameH ? (startOn || endOn) : startOn) hotelPin(startH);
+        add([startH.lat, startH.lng], startOn);
+      }
       let num = 0;
       scheds[i].rows.forEach(r => {
         const s = r.stop;
@@ -2126,16 +2229,18 @@ function renderDayMapsOverlay(plan, opts){
             iconSize: [20, 20], iconAnchor: [10, 18]
           })}).addTo(m);
         }
-        pts.push([s.lat, s.lng]);
+        add([s.lat, s.lng], !s.hidden);
       });
       if(endH){
-        if(!startH || startH.id !== endH.id) hotelPin(endH);
-        pts.push([endH.lat, endH.lng]);
+        if(!sameH && endOn) hotelPin(endH);
+        add([endH.lat, endH.lng], endOn);
       }
-      if(pts.length > 1){
-        L.polyline(pts, { color: dayAccent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
-        m.fitBounds(pts, { padding: [14, 14], maxZoom: 15 });
-      } else if(pts.length === 1) m.setView(pts[0], 14);
+      runs.forEach(run => {
+        if(run.length > 1) L.polyline(run, { color: dayAccent, weight: 2, dashArray: '4 4', opacity: 0.8 }).addTo(m);
+      });
+      const pts = runs.flat();
+      if(pts.length > 1) m.fitBounds(pts, { padding: [14, 14], maxZoom: 15 });
+      else if(pts.length === 1) m.setView(pts[0], 14);
       else m.setView([30, 10], 1);
       apMaps.push(m);
     });

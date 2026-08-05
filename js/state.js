@@ -86,6 +86,8 @@ export function normalizeTrip(t){
     // as derived fields means a round-trip through that device keeps the
     // hotels; the migration above restores them from the mirror. On a split
     // day the old model can only hold one hotel — keep the night's.
+    d.hideStart = !!d.hideStart;
+    d.hideEnd = !!d.hideEnd;
     d.hotelId = d.endHotelId || d.startHotelId;
     d.bookend = d.startHotelId === d.endHotelId ? 'both'
       : !d.startHotelId ? 'end'

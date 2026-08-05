@@ -317,9 +317,30 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       numbered.filter(p => p.cat !== 'hotel').map(p => p.num).join(','));
     const hkml = tripKml(ht);
     check('kml drops the hidden pin', (hkml.match(/<Placemark>/g) || []).length === placemarks - 1);
-    check('kml keeps the route through it',
-      (hkml.match(/<LineString>/g) || []).length === (kml.match(/<LineString>/g) || []).length
-      && hkml.includes(hiddenStop.lng + ',' + hiddenStop.lat + ',0'));
+    check('kml route breaks around it rather than running through it',
+      !hkml.includes(hiddenStop.lng + ',' + hiddenStop.lat + ',0')
+      && (hkml.match(/<MultiGeometry>/g) || []).length === 1
+      && (hkml.match(/<LineString>/g) || []).length === (kml.match(/<LineString>/g) || []).length + 1);
+    check('an untouched trip still exports one plain LineString per day',
+      !kml.includes('<MultiGeometry>') && (kml.match(/<LineString>/g) || []).length === 10);
+
+    // Each end of the day hides on its own: the hotel leaves the map, and so
+    // does the leg to it — the point of it on a transfer day.
+    const bt = parseTrip(md).trip;
+    const beforeHide = dayMapPoints(bt, bt.days[5]).length;
+    bt.days[5].hideStart = true;                       // day 6: Rome hotel → Venice
+    const bpts = dayMapPoints(bt, bt.days[5]);
+    check('a hidden start point is flagged, not dropped',
+      bpts.length === beforeHide && bpts[0].cat === 'hotel' && bpts[0].hidden === true
+      && bpts.filter(p => p.hidden).length === 1);
+    check('hide start / hide end survive a round-trip', (() => {
+      bt.days[5].hideEnd = true;
+      const back = parseTrip(serializeTrip(bt)).trip;
+      return back.days[5].hideStart === true && back.days[5].hideEnd === true
+        && back.days.filter(d => d.hideStart || d.hideEnd).length === 1;
+    })());
+    check('an untouched trip writes no hide start/end lines',
+      !serializeTrip(parseTrip(md).trip).match(/^- hide (start|end):/m));
 
     /* --- 5b. point-to-point travel legs (the Rome → Venice transfer day) --- */
     console.log('point-to-point legs:');
@@ -373,6 +394,26 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
           && !h.includes('data-check="k1"') && h.includes('data-check="k2"');
       })());
       check('photos are only counted once', photoUrls(ot).length === new Set(photoUrls(ot)).size);
+      // The reason the feature exists: on a transfer day the sketch is one
+      // long line between two cities. Hiding the ride and the hotel you
+      // checked out of should leave a map of the city you arrive in.
+      check('hiding a transfer leg fits the sketch on the city it arrives in', (() => {
+        const scaleOf = (html, dayIdx) => {
+          const view = html.split('id="view-d' + dayIdx + '"')[1] || '';
+          const m = /<g class="sc">[\s\S]*?<text[^>]*>([^<]+)<\/text>/.exec(view);
+          return m ? m[1] : null;
+        };
+        const km = label => label && label.endsWith('km') ? Number(label.replace(' km', '')) : Number(label.replace(' m', '')) / 1000;
+        const opts = { generatedAt: new Date('2026-01-01') };
+        const wide = buildOfflineHtml(parseTrip(md).trip, opts);
+        const tt = parseTrip(md).trip;
+        const d6 = tt.days[5];
+        tt.stops[d6.order[0]].hidden = true;          // the Rome → Venice train
+        d6.hideStart = true;                          // and the Rome hotel it left
+        const near = buildOfflineHtml(tt, opts);
+        const before = km(scaleOf(wide, 5)), after = km(scaleOf(near, 5));
+        return before > 20 && after < 5;
+      })());
       check('the offline sketch leaves out a stop hidden from the map', (() => {
         const pinCount = h => (h.match(/<g class="pin/g) || []).length;
         const before = parseTrip(md).trip;

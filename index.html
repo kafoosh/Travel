@@ -142,10 +142,11 @@
       <label class="modal-notes-label" for="modal-notes">Notes</label>
       <textarea id="modal-notes" class="modal-notes" rows="3" placeholder="Quick notes for this stop — booking refs, must-try dishes, who wanted to come here…"></textarea>
       <div class="modal-actions">
-        <button class="reset-btn" id="modal-done" aria-pressed="false">✓ Mark as done</button>
-        <button class="reset-btn" id="modal-hide" aria-pressed="false">👁 Hide from map</button>
+        <!-- Labels and icons are filled in by paintModalDone / paintModalHide. -->
+        <button class="reset-btn ico-btn" id="modal-done" aria-pressed="false"></button>
+        <button class="reset-btn ico-btn" id="modal-hide" aria-pressed="false"></button>
         <button class="reset-btn" id="modal-edit">✎ Edit location</button>
-        <button class="reset-btn" id="modal-bin">🗑 Move to bin</button>
+        <button class="reset-btn ico-btn" id="modal-bin"></button>
       </div>
     </div>
   </div>
