@@ -1111,6 +1111,9 @@ h1.title:hover{color:var(--accent-dark);}
     width:100%;
     margin-left:0; padding-left:0; border-left:none;
   }
+  /* Starting a new trip moves to the More sheet on mobile — the slim top bar
+     is icon-only real estate already spoken for. */
+  #btn-new-trip{ display:none; }
   #btn-settings{ margin-right:auto; }
   .toplinks button{ min-height:44px; padding:8px 13px; }
   /* Sync chip: glyph only at 44px — the full text lives in its title and in
@@ -1186,6 +1189,12 @@ h1.title:hover{color:var(--accent-dark);}
     color:var(--ink); text-align:left; cursor:pointer;
   }
   .sheet-panel button:active{ background:var(--accent-tint); }
+  /* Not a view like the rows above it — set apart with a rule of its own. */
+  .sheet-panel .sheet-divider{
+    margin-top:6px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+  }
   html[data-view="optional"] #mnav-optional,
   html[data-view="bin"] #mnav-bin,
   html[data-view="ai"] #mnav-ai{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; }

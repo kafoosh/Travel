@@ -3133,6 +3133,36 @@ function submitSettings(e){
   renderInfo();
 }
 
+/* Whether there's anything a fresh blank trip would actually discard — a
+   default-named, day-count-only trip with nothing added yet needs no
+   confirmation, in a room or not. */
+function tripHasContent(t){
+  return (!!t.name && t.name !== 'Untitled Trip') || !!t.subtitle || !!t.startDate ||
+    t.hotels.length > 0 || t.checklist.length > 0 || Object.keys(t.stops).length > 0;
+}
+
+/* The top-nav "New trip" action. Unlike Clear trip (Settings) or Empty this
+   room (Trip Info), this never touches the trip the user is currently in —
+   a shared one stays exactly as it is at its own link. It only detaches this
+   browser from it (like "Stop syncing") and then opens a blank, unshared
+   trip in its place, the same page a bare visit to the site opens. */
+function startNewTrip(){
+  const inRoom = !!cloud.room;
+  if(inRoom || tripHasContent(trip())){
+    const msg = inRoom
+      ? 'Start a new trip? This browser leaves the current one — it stays saved at its own link — and opens a blank, unshared trip.'
+      : 'Start a new trip? The current draft is discarded (Undo can bring it back, or Export first for a file copy).';
+    if(!confirm(msg)) return;
+  }
+  pushUndo();
+  if(inRoom) leaveRoom();
+  replaceTrip(blankTrip());
+  applyTheme();
+  setView('days');
+  renderAll();
+  renderInfo();
+}
+
 function clearTrip(){
   const shared = cloud.room
     ? '\n\nThis trip is shared: the blank trip syncs to the link too, so everyone on it loses the itinerary. To keep the shared copy, use "Stop syncing" (Trip Info) first.'
@@ -3235,6 +3265,7 @@ export function wireStaticHandlers(){
   on('more-backdrop', 'click', () => setMore(false));
   [['mnav-optional','optional'], ['mnav-bin','bin'], ['mnav-ai','ai']].forEach(([id, view]) =>
     on(id, 'click', () => { setMore(false); setView(view); }));
+  on('mnav-new-trip', 'click', () => { setMore(false); startNewTrip(); });
   document.addEventListener('keydown', (e) => {
     if(e.key !== 'Escape' || !moreSheet || moreSheet.hidden) return;
     // An overlay stacked above the sheet owns this Escape — close layers one at a time.
@@ -3278,6 +3309,7 @@ export function wireStaticHandlers(){
   on('al-cat', 'change', refreshEndPointFields);
   on('al-lat', 'input', refreshCoordsStatus);
   on('al-lng', 'input', refreshCoordsStatus);
+  on('btn-new-trip', 'click', startNewTrip);
   on('btn-settings', 'click', openSettings);
   on('trip-title', 'click', openSettings);
   on('cloud-chip', 'click', () => setView('info'));
