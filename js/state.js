@@ -54,17 +54,21 @@ function consumeNewTripFlag(){
   return true;
 }
 
+/* Returns whether a stored trip was actually restored. A share link opened
+   where the answer is `false` has nothing to show until the room arrives —
+   app.js holds the first render rather than paint a blank trip meanwhile. */
 export function loadState(){
   try{ localStorage.removeItem('travelPlanner_v1'); } catch(e){}   // pre-share-model key
-  if(consumeNewTripFlag()) return;
+  if(consumeNewTripFlag()) return false;
   try{
     const code = currentRoomCode();
     const raw = code ? localStorage.getItem(ROOM_PREFIX + code) : sessionStorage.getItem(DRAFT_KEY);
     if(raw){
       const saved = JSON.parse(raw);
-      if(isValidTrip(saved.trip)) state.trip = normalizeTrip(saved.trip);
+      if(isValidTrip(saved.trip)){ state.trip = normalizeTrip(saved.trip); return true; }
     }
   } catch(e){ console.warn('Could not load saved trip', e); }
+  return false;
 }
 
 /* Fill any holes in a trip object that came from storage, an import,

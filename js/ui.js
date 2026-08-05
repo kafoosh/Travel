@@ -83,6 +83,14 @@ export function applyTheme(){
   document.documentElement.dataset.theme = t;
 }
 
+/* The shared-trip loading gate (driven from app.js). One root class: the CSS
+   hides the itinerary sections, dims the nav and shows the "Opening…" line.
+   Nothing has rendered into the hero yet at that point, so the title is
+   blank rather than reading "Untitled Trip". */
+export function setTripLoading(on){
+  document.documentElement.classList.toggle('trip-loading', !!on);
+}
+
 function renderHero(){
   $('trip-title').textContent = trip().name || 'Untitled Trip';
   const sub = $('trip-subtitle');
@@ -2975,7 +2983,8 @@ export function renderCloudUI(){
   const ss = $('save-share-btn');
   if(ss){
     if(cloud.room){
-      ss.textContent = cloud.status === 'connecting' ? '◌ Saving…' : '🔗 Share';
+      ss.textContent = cloud.status !== 'connecting' ? '🔗 Share'
+        : cloud.arriving ? '◌ Opening…' : '◌ Saving…';
       ss.title = 'Copy the shareable link to this trip';
     } else {
       ss.textContent = '💾 Save';
