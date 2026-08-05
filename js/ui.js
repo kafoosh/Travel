@@ -3133,34 +3133,17 @@ function submitSettings(e){
   renderInfo();
 }
 
-/* Whether there's anything a fresh blank trip would actually discard — a
-   default-named, day-count-only trip with nothing added yet needs no
-   confirmation, in a room or not. */
-function tripHasContent(t){
-  return (!!t.name && t.name !== 'Untitled Trip') || !!t.subtitle || !!t.startDate ||
-    t.hotels.length > 0 || t.checklist.length > 0 || Object.keys(t.stops).length > 0;
-}
-
 /* The top-nav "New trip" action. Unlike Clear trip (Settings) or Empty this
-   room (Trip Info), this never touches the trip the user is currently in —
-   a shared one stays exactly as it is at its own link. It only detaches this
-   browser from it (like "Stop syncing") and then opens a blank, unshared
-   trip in its place, the same page a bare visit to the site opens. */
+   room (Trip Info), it never touches the trip the user is currently in —
+   shared or an unsaved draft, this tab keeps it exactly as it is. It opens a
+   second tab at the bare URL plus a one-shot marker (see loadState in
+   state.js) that forces that tab to start blank rather than inherit this
+   tab's sessionStorage draft, which browsers otherwise clone into a
+   same-origin new tab. No confirmation needed — nothing here is discarded. */
 function startNewTrip(){
-  const inRoom = !!cloud.room;
-  if(inRoom || tripHasContent(trip())){
-    const msg = inRoom
-      ? 'Start a new trip? This browser leaves the current one — it stays saved at its own link — and opens a blank, unshared trip.'
-      : 'Start a new trip? The current draft is discarded (Undo can bring it back, or Export first for a file copy).';
-    if(!confirm(msg)) return;
-  }
-  pushUndo();
-  if(inRoom) leaveRoom();
-  replaceTrip(blankTrip());
-  applyTheme();
-  setView('days');
-  renderAll();
-  renderInfo();
+  const url = location.origin + location.pathname + '?newTrip=1';
+  const opened = window.open(url, '_blank', 'noopener');
+  if(!opened) alert('Your browser blocked the new tab — allow pop-ups for this site and try again.');
 }
 
 function clearTrip(){
