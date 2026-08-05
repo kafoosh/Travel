@@ -24,7 +24,14 @@
 
 import { parseTime, haversineKm } from './util.js';
 import { knownMinutes } from './routing.js';
-import { getStartHotel, getEndHotel } from './schedule.js';
+import { getStartHotel, getEndHotel, departPoint } from './schedule.js';
+
+/* Where a leg leaving `p` really starts: a stop departs from its end point
+   (a hike's finish, a train's arrival station); plain {lat,lng} anchors and
+   hotel points pass through unchanged. */
+function departOf(p){
+  return (p && p.id) ? (departPoint(p) || p) : p;
+}
 
 const DAY_END_MIN = 22 * 60 + 30;   // assume nobody plans past ~10:30pm
 const ANCHOR_CATS = ['travel', 'boat', 'hotel', 'flight'];
@@ -93,7 +100,7 @@ export function optimizeDayOrder(trip, day){
   while(remaining.length){
     let bi = 0, bd = Infinity;
     remaining.forEach((s, i) => {
-      const d = legMinutes(cur, s, startBoat && cur === anchor);
+      const d = legMinutes(departOf(cur), s, startBoat && cur === anchor);
       if(d < bd){ bd = d; bi = i; }
     });
     const next = remaining.splice(bi, 1)[0];
@@ -107,7 +114,7 @@ export function optimizeDayOrder(trip, day){
     if(!a || !b) return 0;
     const isBoatLeg = (startBoat && (a === anchor || b === anchor)) ||
                       (endBoat && (a === endPoint || b === endPoint));
-    return legMinutes(a, b, isBoatLeg);
+    return legMinutes(departOf(a), b, isBoatLeg);
   };
   twoOpt(path, cost);
 
@@ -156,7 +163,7 @@ function chainOrder(stops){
   while(rem.length){
     const cur = out[out.length - 1];
     let bi = 0, bd = Infinity;
-    rem.forEach((s, i) => { const d = legMinutes(cur, s, false); if(d < bd){ bd = d; bi = i; } });
+    rem.forEach((s, i) => { const d = legMinutes(departOf(cur), s, false); if(d < bd){ bd = d; bi = i; } });
     out.push(rem.splice(bi, 1)[0]);
   }
   return out;
@@ -166,7 +173,7 @@ function chainOrder(stops){
 function hoodMinutes(stops){
   let m = stops.reduce((n, s) => n + s.dur, 0);
   const ordered = chainOrder(stops);
-  for(let i = 1; i < ordered.length; i++) m += legMinutes(ordered[i-1], ordered[i], false);
+  for(let i = 1; i < ordered.length; i++) m += legMinutes(departOf(ordered[i-1]), ordered[i], false);
   return m;
 }
 
@@ -179,7 +186,7 @@ function orderStops(stops, startPt, endPt){
   if(!startPt){ path.push(rem.shift()); cur = path[0]; }
   while(rem.length){
     let bi = 0, bd = Infinity;
-    rem.forEach((s, i) => { const d = legMinutes(cur, s, false); if(d < bd){ bd = d; bi = i; } });
+    rem.forEach((s, i) => { const d = legMinutes(departOf(cur), s, false); if(d < bd){ bd = d; bi = i; } });
     cur = rem.splice(bi, 1)[0];
     path.push(cur);
   }
@@ -187,7 +194,7 @@ function orderStops(stops, startPt, endPt){
   const at = i => i < 0 ? (startPt || head) : (i >= path.length ? endPt : path[i]);
   const cost = (i, j) => {
     const a = at(i), b = at(j);
-    return (a && b) ? legMinutes(a, b, false) : 0;
+    return (a && b) ? legMinutes(departOf(a), b, false) : 0;
   };
   twoOpt(path, cost);
   return head ? [head, ...path] : path;
@@ -221,7 +228,7 @@ function simTimes(day, seq){
     }
     starts.push(t);
     t += s.dur;
-    if(s.lat != null) prev = (s.cat === 'hike' && s.endLat != null) ? { lat: s.endLat, lng: s.endLng } : s;
+    if(s.lat != null) prev = departPoint(s);
   });
   return { starts, end: t };
 }
@@ -291,7 +298,7 @@ export function autoPlanOrders(trip){
   // Day budgets: waking window minus the immovable anchors' own time.
   const anchorMinutes = anchorsByDay.map(list => {
     let m = list.reduce((n, s) => n + s.dur, 0);
-    for(let i = 1; i < list.length; i++) m += legMinutes(list[i-1], list[i], false);
+    for(let i = 1; i < list.length; i++) m += legMinutes(departOf(list[i-1]), list[i], false);
     return m;
   });
   const budgets = days.map((d, i) => Math.max(120, DAY_END_MIN - parseTime(d.start) - anchorMinutes[i]));
@@ -363,14 +370,20 @@ export function autoPlanOrders(trip){
   /* ---- 3a. anchored days claim their nearest neighbourhoods.
      Claims resolve globally by distance to the day's NEAREST anchor —
      the day whose boat actually docks at Murano gets the Murano
-     neighbourhood, even if an earlier day's anchors are vaguely close. ---- */
+     neighbourhood, even if an earlier day's anchors are vaguely close.
+     An anchor counts at its DEPART point: a Rome → Venice train claims
+     around the Venice arrival station, where the day's free time is,
+     not around the departure platform it leaves at 08:30. ---- */
   const claimedBy = new Array(hoods.length).fill(-1);
   const dayLoad = new Array(k).fill(0);
   const claims = [];
   days.forEach((d, i) => {
     if(!anchorsByDay[i].length) return;
     hoods.forEach((h, hi) => {
-      const dist = Math.min(...anchorsByDay[i].map(a => haversineKm(a.lat, a.lng, h.c.lat, h.c.lng)));
+      const dist = Math.min(...anchorsByDay[i].map(a => {
+        const p = departOf(a);
+        return haversineKm(p.lat, p.lng, h.c.lat, h.c.lng);
+      }));
       if(dist < 10) claims.push({ i, hi, dist });
     });
   });
@@ -454,7 +467,8 @@ export function autoPlanOrders(trip){
     if(claimedBy[hi] !== -1) return;
     let best = -1;
     days.forEach((d, i) => {
-      const near = anchorsByDay[i].length ? haversineKm(centroid(anchorsByDay[i]).lat, centroid(anchorsByDay[i]).lng, h.c.lat, h.c.lng) : 0;
+      const anchorPts = anchorsByDay[i].map(departOf);
+      const near = anchorPts.length ? haversineKm(centroid(anchorPts).lat, centroid(anchorPts).lng, h.c.lat, h.c.lng) : 0;
       if(near > 100) return;
       if(best === -1 || (budgets[i] - dayLoad[i]) > (budgets[best] - dayLoad[best])) best = i;
     });
@@ -496,8 +510,8 @@ export function autoPlanOrders(trip){
           if(gapForbidden[g]) continue;
           const prev = g > 0 ? anchors[g - 1] : null;
           const next = g < anchors.length ? anchors[g] : null;
-          let dd = Math.min(prev ? legMinutes(prev, s, false) : Infinity,
-                            next ? legMinutes(s, next, false) : Infinity);
+          let dd = Math.min(prev ? legMinutes(departOf(prev), s, false) : Infinity,
+                            next ? legMinutes(departOf(s), next, false) : Infinity);
           if(next && early[g]) dd += 0.5;            // tie-break: don't slot before a day-opening anchor
           if(prev && !early[g - 1]) dd += 0.5;       // tie-break: don't slot after a day-closing anchor
           if(dd < bd){ bd = dd; bg = g; }

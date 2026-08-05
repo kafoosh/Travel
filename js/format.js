@@ -12,6 +12,13 @@
 
 export const CATEGORIES = ['landmark','museum','church','park','view','food','shop','hike','hotel','flight','travel','boat','other'];
 
+/* Categories that can run point-to-point: the stop starts at (lat,lng) — a
+   trailhead, a departure station or airport, a dock — and may end somewhere
+   else (endLat,endLng). The commute is computed to the START point, the
+   stop's duration is the leg itself, and the day continues from the END
+   point. Without end coordinates such a stop is an ordinary single point. */
+export const AB_CATS = ['hike','travel','flight','boat'];
+
 /* The face of each category / travel mode. They live here, next to the
    category list itself, because more than one renderer needs them: the site
    (js/ui.js) and the self-contained offline export (js/offline.js), which

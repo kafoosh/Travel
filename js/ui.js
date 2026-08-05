@@ -7,7 +7,7 @@
    ========================================================= */
 
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
-import { CATEGORIES, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
+import { CATEGORIES, AB_CATS, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
          newDay, serializeTrip, importText, blankTrip } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
 import { computeSchedule } from './schedule.js';
@@ -23,8 +23,8 @@ import { mountImage } from './img.js';
 const CAT_LABEL = {
   landmark:'Landmark', museum:'Museum', church:'Church / temple', park:'Park / nature',
   view:'Viewpoint', food:'Food & drink', shop:'Shopping', hike:'Hike (A → B)',
-  hotel:'Hotel / check-in', flight:'Flight', travel:'Train / travel leg',
-  boat:'Boat / ferry', other:'Other'
+  hotel:'Hotel / check-in', flight:'Flight (A → B)', travel:'Train / travel leg (A → B)',
+  boat:'Boat / ferry (A → B)', other:'Other'
 };
 const MODE_LABEL = { walk:'walk', cycle:'cycle', transit:'transit', bus:'bus', metro:'metro', tram:'tram', ferry:'ferry', taxi:'taxi', boat:'boat' };
 // Choosable per-leg overrides (submodes like bus/metro come from the router, not the picker)
@@ -573,7 +573,7 @@ function renderScheduleList(day, sched){
           <span>${formatDur(s.dur)}</span>
           ${s.fixedStart ? `<span class="fixed-chip" title="Fixed start time">⏰ ${formatTime(parseTimeStr(s.fixedStart))}</span>` : ''}
           ${row.late > 0 ? `<span class="late-chip" title="The plan reaches this stop after its fixed time">⚠ ${row.late} min late</span>` : ''}
-          ${s.cat === 'hike' && s.endLat != null ? `<span class="fixed-chip" title="Point-to-point hike">🥾 A→B</span>` : ''}
+          ${AB_CATS.includes(s.cat) && s.endLat != null ? `<span class="fixed-chip" title="${s.cat === 'hike' ? 'Point-to-point hike' : 'Point-to-point leg — the day continues from where it arrives'}">${s.cat === 'hike' ? '🥾' : ICONS[s.cat] || '🚄'} A→B</span>` : ''}
         </div>
         <p class="stop-name">${esc(s.name)}</p>
         <p class="stop-desc">${esc(s.desc)}</p>
@@ -986,18 +986,21 @@ function renderMap(day, sched){
     pts.push(cur);
     prevPt = cur;
 
-    // Point-to-point hike: draw the hike itself and continue from its end.
-    if(s.cat === 'hike' && s.endLat != null && s.endLng != null){
+    // Point-to-point stop: draw the leg itself and continue from its end —
+    // a hike as its routed walking path, a ride as a straight line between
+    // its stations.
+    if(AB_CATS.includes(s.cat) && s.endLat != null && s.endLng != null){
       const end = [s.endLat, s.endLng];
-      const flagIcon = L.divIcon({
+      const isHike = s.cat === 'hike';
+      const endIcon = L.divIcon({
         className: '',
-        html: '<div class="map-pin hike-end-pin"><span>🏁</span></div>',
+        html: '<div class="map-pin hike-end-pin"><span>' + (isHike ? '🏁' : (ICONS[s.cat] || '📍')) + '</span></div>',
         iconSize: [26,26],
         iconAnchor: [13,24]
       });
-      L.marker(end, { icon: flagIcon }).addTo(mapLayerGroup)
-        .bindPopup('<b>' + esc(s.name) + '</b><br>hike ends here');
-      segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: true });
+      L.marker(end, { icon: endIcon }).addTo(mapLayerGroup)
+        .bindPopup('<b>' + esc(s.name) + '</b><br>' + (isHike ? 'hike ends here' : 'arrives here'));
+      segs.push({ from: cur, to: end, path: row.hikeLeg ? row.hikeLeg.path : null, hike: isHike });
       pts.push(end);
       prevPt = end;
     }
@@ -1154,8 +1157,10 @@ export function refreshCoordsStatus(){
   });
 }
 
-function refreshHikeFields(){
-  $('al-end-wrap').classList.toggle('hidden', $('al-cat').value !== 'hike');
+/* The "ends at" fields appear for any category that can run point-to-point:
+   a hike, a train / travel leg, a flight, a boat. */
+function refreshEndPointFields(){
+  $('al-end-wrap').classList.toggle('hidden', !AB_CATS.includes($('al-cat').value));
 }
 
 export function openLocationForm(editStopId, defaultDayId){
@@ -1191,7 +1196,7 @@ export function openLocationForm(editStopId, defaultDayId){
 
   $('al-coords-wrap').classList.add('hidden');
   refreshCoordsStatus();
-  refreshHikeFields();
+  refreshEndPointFields();
 
   $('add-location-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
@@ -1216,8 +1221,8 @@ function submitLocationForm(e){
     return;
   }
   const cat = $('al-cat').value;
-  const endLat = cat === 'hike' ? parseFloat($('al-endlat').value) : NaN;
-  const endLng = cat === 'hike' ? parseFloat($('al-endlng').value) : NaN;
+  const endLat = AB_CATS.includes(cat) ? parseFloat($('al-endlat').value) : NaN;
+  const endLng = AB_CATS.includes(cat) ? parseFloat($('al-endlng').value) : NaN;
   pushUndo();
   const editId = $('al-editing').value;
   const id = editId || nextStopId();
@@ -3073,7 +3078,7 @@ export function wireStaticHandlers(){
     e.preventDefault();
     openSearch();
   });
-  on('al-cat', 'change', refreshHikeFields);
+  on('al-cat', 'change', refreshEndPointFields);
   on('al-lat', 'input', refreshCoordsStatus);
   on('al-lng', 'input', refreshCoordsStatus);
   on('btn-settings', 'click', openSettings);
@@ -3167,7 +3172,7 @@ export function wireStaticHandlers(){
     $('al-lat').value = r.lat;
     $('al-lng').value = r.lng;
     if(!$('al-editing').value) $('al-cat').value = r.cat;   // don't override an existing stop's category
-    refreshHikeFields();
+    refreshEndPointFields();
     refreshCoordsStatus();
   }, (status) => {
     if((status.error || status.count === 0) && !$('al-lat').value.trim()){

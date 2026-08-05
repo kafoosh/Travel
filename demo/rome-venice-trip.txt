@@ -371,12 +371,14 @@
 
 ## Day 6: Travel & Arrival
 - start: 08:00
-- start hotel: none
+- start hotel: The Tribune, JdV by Hyatt
 - end hotel: AC Hotel Venezia by Marriott
 
 ### Train — Rome to Venice
-- lat: 45.4413
-- lng: 12.321
+- lat: 41.901
+- lng: 12.5018
+- end lat: 45.4413
+- end lng: 12.321
 - category: travel
 - duration: 225
 - image: https://commons.wikimedia.org/wiki/Special:FilePath/ETR_400_Roma_Tiburtina_train_station_24_20181231.jpg?width=1200

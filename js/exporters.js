@@ -22,7 +22,11 @@
 
 import { computeSchedule } from './schedule.js';
 import { formatTime } from './util.js';
-import { DAY_COLORS } from './format.js';
+import { DAY_COLORS, AB_CATS } from './format.js';
+
+/* A point-to-point stop's second point, for lists and route lines: a hike's
+   finish or a ride's arrival station/airport. */
+const endLabel = s => s.name + (s.cat === 'hike' ? ' (hike end)' : ' (arrival)');
 
 /* KML colors are aabbggrr; b3 ≈ 70% opacity, matching the default route style. */
 function kmlColor(hex){
@@ -55,8 +59,8 @@ export function dayMapPoints(trip, day){
     if(s.lat == null) return;
     n += 1;
     pts.push({ lat: s.lat, lng: s.lng, label: s.name, cat: s.cat, when: formatTime(r.start), num: String(n) });
-    if(s.cat === 'hike' && s.endLat != null)
-      pts.push({ lat: s.endLat, lng: s.endLng, label: s.name + ' (hike end)', cat: 'hike', when: '', num: n + 'b' });
+    if(AB_CATS.includes(s.cat) && s.endLat != null)
+      pts.push({ lat: s.endLat, lng: s.endLng, label: endLabel(s), cat: s.cat, when: '', num: n + 'b' });
   });
   if(endHotel && endHotel.lat != null && pts.length)
     pts.push({ lat: endHotel.lat, lng: endHotel.lng, label: endHotel.name, cat: 'hotel', when: 'End of the day', num: null });
@@ -110,7 +114,7 @@ export function tripKml(trip){
       const desc = [formatTime(r.start) + ' · ' + s.dur + ' min', s.desc, s.notes ? 'Notes: ' + s.notes : '']
         .filter(Boolean).join('\n');
       L.push(placemark(n + '. ' + s.name, desc, s.lat, s.lng));
-      if(s.cat === 'hike' && s.endLat != null) L.push(placemark(n + 'b. ' + s.name + ' (hike end)', '', s.endLat, s.endLng));
+      if(AB_CATS.includes(s.cat) && s.endLat != null) L.push(placemark(n + 'b. ' + endLabel(s), '', s.endLat, s.endLng));
     });
     const pts = dayMapPoints(trip, day);
     if(pts.length > 1){

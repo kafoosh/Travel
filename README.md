@@ -101,7 +101,7 @@ Free text…
 …
 ```
 
-A day names either one `hotel:` (it starts *and* ends there — the normal case) or a `start hotel:` / `end hotel:` pair when the two ends differ (arrival days start at `none`, departure days end at `none`, hotel-change days name one of each); files from before this distinction, with `hotel bookend:` lines, still import. The parser is tolerant (key aliases, `-`/`*`/bare `key: value`, `1h 45m` durations, etc.). CSV import expects a header row with at least `name`; recognised columns: `name, day, lat, lng, category, duration, description, detail, image, notes, tags, done` (`day` = number or `unassigned`).
+A day names either one `hotel:` (it starts *and* ends there — the normal case) or a `start hotel:` / `end hotel:` pair when the two ends differ (arrival days start at `none`, departure days end at `none`, hotel-change days name one of each); files from before this distinction, with `hotel bookend:` lines, still import. A stop that moves (`hike`, `travel`, `flight`, `boat`) may carry `end lat` / `end lng`: its own coordinates are the departure point (trailhead, station, airport), the end coordinates the arrival — the commute is computed to the departure point, `duration` is the leg itself, and the day continues from the arrival end. The parser is tolerant (key aliases, `-`/`*`/bare `key: value`, `1h 45m` durations, etc.). CSV import expects a header row with at least `name`; recognised columns: `name, day, lat, lng, category, duration, description, detail, image, notes, tags, done` (`day` = number or `unassigned`).
 
 ## Enabling shared trips (one-time, free, ~5 minutes)
 
