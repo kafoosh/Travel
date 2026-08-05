@@ -125,28 +125,35 @@ const mercX = (lng) => lng * Math.PI / 180;
 const mercY = (lat) => -Math.log(Math.tan(Math.PI / 4 + (Math.max(-85, Math.min(85, lat)) * Math.PI / 180) / 2));
 const EARTH_KM = 6371;
 
-function daySegments(sched){
+/* Legs of the day, in order. Anything hidden from the map in the planner is
+   hidden here too — no pin, and no leg touching it, so the sketch breaks where
+   the map does instead of stretching across a country nobody wants to see. */
+function daySegments(sched, day){
   const segs = [];
   const startHotel = sched.startHotel && sched.startHotel.lat != null
     ? { lat: sched.startHotel.lat, lng: sched.startHotel.lng } : null;
   const endHotel = sched.endHotel && sched.endHotel.lat != null
     ? { lat: sched.endHotel.lat, lng: sched.endHotel.lng } : null;
+  const startOn = !(day && day.hideStart), endOn = !(day && day.hideEnd);
   let prev = startHotel;
+  let prevOn = startOn;
 
   sched.rows.forEach(row => {
     const s = row.stop;
     if(s.lat == null) return;
+    const on = !s.hidden;
     const here = { lat: s.lat, lng: s.lng };
-    if(prev) segs.push({ from: prev, to: here, path: row.travelPath, mode: row.travelMode });
+    if(prev && prevOn && on) segs.push({ from: prev, to: here, path: row.travelPath, mode: row.travelMode });
     const dep = departPoint(s);
     // The stop's own point-to-point movement: a hike's routed walk, or a
     // ride's straight line between its stations.
-    if(dep && (dep.lat !== s.lat || dep.lng !== s.lng))
+    if(on && dep && (dep.lat !== s.lat || dep.lng !== s.lng))
       segs.push({ from: here, to: dep, path: row.hikeLeg ? row.hikeLeg.path : null, mode: row.hikeLeg ? 'walk' : null });
     if(dep) prev = dep;
+    prevOn = on;
   });
 
-  if(endHotel && sched.trailTransfer && prev)
+  if(endHotel && sched.trailTransfer && prev && prevOn && endOn)
     segs.push({ from: prev, to: endHotel, path: sched.trailTransfer.path, mode: sched.trailTransfer.mode });
   return segs;
 }
@@ -171,8 +178,9 @@ function scaleBar(kmPerPx, mapH){
 }
 
 function daySvg(trip, day, sched){
-  const pts = dayMapPoints(trip, day);
-  const segs = daySegments(sched);
+  // Only what is drawn: a hidden point neither shows nor pulls the bounds.
+  const pts = dayMapPoints(trip, day).filter(p => !p.hidden);
+  const segs = daySegments(sched, day);
   if(pts.length < 1) return '';
 
   // Bounds over every drawn coordinate, pins and route geometry alike.
@@ -215,9 +223,7 @@ function daySvg(trip, day, sched){
     return `<polyline class="rt${routed ? '' : ' est'}" points="${coords.map(c => px(c[1]) + ',' + py(c[0])).join(' ')}"></polyline>`;
   }).join('');
 
-  // A stop hidden from the map in the planner is hidden here too — its number
-  // is simply missing from the sketch, exactly as it is on screen.
-  const pins = pts.filter(p => !p.hidden).map(p => {
+  const pins = pts.map(p => {
     const x = px(p.lng), y = py(p.lat);
     if(p.num == null)
       return `<g class="pin hotel"><circle cx="${x}" cy="${y}" r="9"></circle><text x="${x}" y="${y + 3.5}">⌂</text></g>`;

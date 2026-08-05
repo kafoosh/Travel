@@ -47,15 +47,16 @@ function xmlEsc(s){
    pins on the day map): a running count over located stops, `Nb` for a hike's
    end point, null for the hotel bookends, which the day never numbers. It is
    a property of the plan, not of any selection made from it. `hidden` marks a
-   stop the user has taken off the map — still a point of the day (it keeps its
-   number, and the route runs through it), so callers that draw pins skip it
-   while callers that measure or route do not. */
+   point the user has taken off the map — a stop with its own eye, or an end of
+   the day whose hotel is hidden. It stays in the list and keeps its number:
+   callers that draw a map skip it (and the legs either side of it), callers
+   that list or offer the day's points keep it. */
 export function dayMapPoints(trip, day){
   const sched = computeSchedule(trip, day);
   const pts = [];
   const startHotel = sched.startHotel, endHotel = sched.endHotel;
   if(startHotel && startHotel.lat != null)
-    pts.push({ lat: startHotel.lat, lng: startHotel.lng, label: startHotel.name, cat: 'hotel', when: 'Start of the day', num: null });
+    pts.push({ lat: startHotel.lat, lng: startHotel.lng, label: startHotel.name, cat: 'hotel', when: 'Start of the day', num: null, hidden: !!day.hideStart });
   let n = 0;
   sched.rows.forEach(r => {
     const s = r.stop;
@@ -66,7 +67,7 @@ export function dayMapPoints(trip, day){
       pts.push({ lat: s.endLat, lng: s.endLng, label: endLabel(s), cat: s.cat, when: '', num: n + 'b', hidden: !!s.hidden });
   });
   if(endHotel && endHotel.lat != null && pts.length)
-    pts.push({ lat: endHotel.lat, lng: endHotel.lng, label: endHotel.name, cat: 'hotel', when: 'End of the day', num: null });
+    pts.push({ lat: endHotel.lat, lng: endHotel.lng, label: endHotel.name, cat: 'hotel', when: 'End of the day', num: null, hidden: !!day.hideEnd });
   return pts;
 }
 
@@ -122,13 +123,25 @@ export function tripKml(trip){
       L.push(placemark(n + '. ' + s.name, desc, s.lat, s.lng));
       if(AB_CATS.includes(s.cat) && s.endLat != null) L.push(placemark(n + 'b. ' + endLabel(s), '', s.endLat, s.endLng));
     });
-    const pts = dayMapPoints(trip, day);
-    if(pts.length > 1){
+    // The route follows the points still on the map, and breaks where one was
+    // taken off it — a day whose long transfer is hidden draws the walking
+    // around at each end, not a line between two cities. Several runs travel
+    // as one MultiGeometry, so My Maps still sees a single route feature.
+    const runs = [];
+    dayMapPoints(trip, day).forEach(p => {
+      if(p.hidden){ runs.push([]); return; }
+      if(!runs.length) runs.push([]);
+      runs[runs.length - 1].push(p);
+    });
+    const drawn = runs.filter(r => r.length > 1);
+    if(drawn.length){
+      const line = r => '<LineString><tessellate>1</tessellate><coordinates>' +
+        r.map(p => p.lng + ',' + p.lat + ',0').join(' ') + '</coordinates></LineString>';
       L.push('<Placemark><name>' + xmlEsc('Day ' + day.id + ' route') + '</name><styleUrl>#route' +
         (DAY_COLORS[day.color] ? '-' + day.color : '') + '</styleUrl>' +
-        '<LineString><tessellate>1</tessellate><coordinates>' +
-        pts.map(p => p.lng + ',' + p.lat + ',0').join(' ') +
-        '</coordinates></LineString></Placemark>');
+        (drawn.length === 1 ? line(drawn[0])
+          : '<MultiGeometry>' + drawn.map(line).join('') + '</MultiGeometry>') +
+        '</Placemark>');
     }
     L.push('</Folder>');
   });

@@ -59,7 +59,11 @@ export function newDay(n){
   // spent — usually the same hotel, but an arrival day may have no start, a
   // departure day no end, and a hotel-change day one of each.
   // color: a DAY_COLORS key, or null to follow the theme accent
-  return { id:n, title:'Day ' + n, start:'09:00', startHotelId:null, endHotelId:null, returnBy:null, color:null, order:[] };
+  // hideStart / hideEnd: that end of the day is off the map — its hotel pin
+  // and the leg to or from it aren't drawn. A display flag, like a stop's
+  // `hidden`: the schedule still departs from and returns to the hotel.
+  return { id:n, title:'Day ' + n, start:'09:00', startHotelId:null, endHotelId:null, returnBy:null,
+    color:null, hideStart:false, hideEnd:false, order:[] };
 }
 
 export function blankTrip(){
@@ -159,6 +163,9 @@ export function serializeTrip(trip){
     }
     if(d.returnBy) L.push('- return by: ' + d.returnBy);
     if(d.color) L.push('- color: ' + d.color);
+    // Written only when set, so a day nobody has touched reads as it always did.
+    if(d.hideStart) L.push('- hide start: yes');
+    if(d.hideEnd) L.push('- hide end: yes');
     L.push('');
     d.order.forEach(id => {
       const s = trip.stops[id];
@@ -240,6 +247,7 @@ const KEY_ALIASES = {
   notes:'notes', note:'notes',
   done:'done', visited:'done', completed:'done', seen:'done',
   hidden:'hidden', hide:'hidden', 'off map':'hidden', 'hide on map':'hidden',
+  'hide start':'hideStart', 'hide end':'hideEnd',
   tags:'tags',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
@@ -304,7 +312,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|hide start|hide end|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -474,6 +482,8 @@ export function parseTrip(text){
         else if(key === 'endHotel') section.__endHotelName = noneOr(value);
         else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.__bookend = value.toLowerCase();
         else if(key === 'returnBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) section.returnBy = v; }
+        else if(key === 'hideStart') section.hideStart = isYes(value);
+        else if(key === 'hideEnd') section.hideEnd = isYes(value);
         else if(key === 'color' && DAY_COLORS[value.toLowerCase()]) section.color = value.toLowerCase();
       } else if(!section){
         // trip-level metadata

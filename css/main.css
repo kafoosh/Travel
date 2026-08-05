@@ -472,6 +472,18 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .hotel-pick:hover{ background:var(--accent-tint); }
 .hotel-pick:focus-within{ outline:2px solid var(--accent); outline-offset:1px; }
+/* Third segment of the pill: takes this end of the day off the map. */
+.hotel-pick .hp-eye{
+  border:none;
+  border-left:1px solid var(--accent);
+  border-radius:0;
+  background:transparent;
+  padding:0 9px;
+  font-size:11px;
+  align-self:stretch;
+}
+.hotel-pick .hp-eye:hover:not(:disabled){ background:var(--accent); color:#fff; }
+.hotel-pick .hp-eye:disabled{ opacity:.35; cursor:default; }
 .map-pin.hotel-pin{border-radius:6px;transform:none;background:var(--gold) !important;}
 .map-pin.hotel-pin span{transform:none;}
 
@@ -563,9 +575,28 @@ h1.title:hover{color:var(--accent-dark);}
   border-radius:6px;
   border:1px solid var(--line);
   background:var(--card);
+  color:var(--ink-soft);
   cursor:pointer;
 }
-.bin-btn:hover{background:#f4d9d9; border-color:#c0645f;}
+.bin-btn:hover{background:#f4d9d9; border-color:#c0645f; color:var(--danger);}
+
+/* =========================================================
+   BUTTON ICONS
+   Drawn, not typed: one shape on every platform, sized in em
+   so it tracks the button's font-size, stroked in currentColor
+   so a filled state inverts it without a second asset.
+   ========================================================= */
+.btn-icon{
+  width:1.25em;
+  height:1.25em;
+  display:block;
+  margin:0 auto;
+  vertical-align:middle;
+  overflow:visible;         /* strokes sit on the viewBox edge */
+}
+/* An icon-and-label button (the stop popup's actions) keeps them on one line. */
+.ico-btn{ display:inline-flex; align-items:center; gap:7px; }
+.ico-btn .btn-icon{ margin:0; }
 
 /* =========================================================
    DONE TICKS
@@ -611,18 +642,9 @@ h1.title:hover{color:var(--accent-dark);}
   cursor:pointer;
 }
 .hide-btn:hover{background:var(--accent-tint); border-color:var(--accent);}
-/* The eye is a text-presentation glyph, so it follows `color` — it has to
-   turn white or it vanishes into the filled state. */
+/* Hidden: the button fills, and the icon (stroked in currentColor) inverts
+   with it. The slash through the eye is drawn by the icon itself. */
 .hide-btn.off{background:var(--ink-soft); border-color:var(--ink-soft); color:#fff;}
-/* No eye-with-a-slash that renders everywhere — draw the slash. */
-.hide-btn.off::after{
-  content:'';
-  position:absolute;
-  left:15%; right:15%; top:50%;
-  border-top:2px solid #fff;
-  transform:rotate(-20deg);
-  pointer-events:none;
-}
 .stop-card.off-map, .bin-row.off-map{opacity:.62;}
 .stop-card.off-map .stop-number{
   background:transparent;
@@ -1241,6 +1263,7 @@ h1.title:hover{color:var(--accent-dark);}
   .hotel-opts .hotel-toggle-label{ display:none; }  /* the summary line already says it */
   .hotel-pick{ min-height:44px; width:100%; }       /* one full-width row per end */
   .hotel-pick select{ flex:1; max-width:none; }
+  .hotel-pick .hp-eye{ min-width:44px; font-size:14px; }
 
   .schedule{ padding:12px 12px 18px; }
   .mappanel{ padding:12px 12px 18px; }
