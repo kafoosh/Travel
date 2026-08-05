@@ -127,9 +127,11 @@ const EARTH_KM = 6371;
 
 function daySegments(sched){
   const segs = [];
-  const hotel = sched.hotel && sched.hotel.lat != null ? { lat: sched.hotel.lat, lng: sched.hotel.lng } : null;
-  const bookend = sched.bookend || 'both';
-  let prev = (hotel && bookend !== 'end') ? hotel : null;
+  const startHotel = sched.startHotel && sched.startHotel.lat != null
+    ? { lat: sched.startHotel.lat, lng: sched.startHotel.lng } : null;
+  const endHotel = sched.endHotel && sched.endHotel.lat != null
+    ? { lat: sched.endHotel.lat, lng: sched.endHotel.lng } : null;
+  let prev = startHotel;
 
   sched.rows.forEach(row => {
     const s = row.stop;
@@ -142,8 +144,8 @@ function daySegments(sched){
     if(dep) prev = dep;
   });
 
-  if(hotel && bookend !== 'start' && sched.trailTransfer && prev)
-    segs.push({ from: prev, to: hotel, path: sched.trailTransfer.path, mode: sched.trailTransfer.mode });
+  if(endHotel && sched.trailTransfer && prev)
+    segs.push({ from: prev, to: endHotel, path: sched.trailTransfer.path, mode: sched.trailTransfer.mode });
   return segs;
 }
 
@@ -305,9 +307,9 @@ function dayHtml(trip, day, idx, opts){
   ].filter(Boolean);
 
   const body = [];
-  if(sched.hotel && sched.leadTransfer)
+  if(sched.startHotel && sched.leadTransfer)
     body.push(connectorHtml(sched.leadTransfer.minutes, sched.leadTransfer.mode, sched.leadTransfer.live,
-      'Depart ' + sched.hotel.name + ','));
+      'Depart ' + sched.startHotel.name + ','));
 
   let num = 0;
   sched.rows.forEach((row, i) => {
@@ -332,21 +334,29 @@ function dayHtml(trip, day, idx, opts){
     }));
   });
 
+  const sameHotel = sched.startHotel && sched.endHotel && sched.startHotel.id === sched.endHotel.id;
   if(!sched.rows.length) body.push('<p class="empty">Nothing planned for this day.</p>');
   if(sched.trailTransfer)
     body.push(connectorHtml(sched.trailTransfer.minutes, sched.trailTransfer.mode, sched.trailTransfer.live,
-      'Back to ' + (sched.hotel ? sched.hotel.name : 'the hotel') + ','));
-  if(sched.rows.length && sched.hotel)
-    body.push(`<p class="dayend">Back by ${esc(formatTime(sched.returnTime))}</p>`);
+      (sameHotel ? 'Back to ' : 'On to ') + (sched.endHotel ? sched.endHotel.name : 'the hotel') + ','));
+  if(sched.rows.length && sched.endHotel)
+    body.push(`<p class="dayend">${sameHotel ? 'Back' : 'At ' + esc(sched.endHotel.name)} by ${esc(formatTime(sched.returnTime))}</p>`);
 
   const map = opts.maps && sched.rows.some(r => r.stop.lat != null) ? daySvg(trip, day, sched) : '';
+
+  let hotelLine = '';
+  if(sameHotel) hotelLine = `🛏 ${esc(sched.startHotel.name)}`;
+  else if(sched.startHotel && sched.endHotel)
+    hotelLine = `🛏 ${esc(sched.startHotel.name)} <span class="quiet">→</span> ${esc(sched.endHotel.name)} <span class="quiet">(hotel change)</span>`;
+  else if(sched.startHotel) hotelLine = `🛏 ${esc(sched.startHotel.name)} <span class="quiet">(start of the day only)</span>`;
+  else if(sched.endHotel) hotelLine = `🛏 ${esc(sched.endHotel.name)} <span class="quiet">(end of the day only)</span>`;
 
   return `
   <section class="view" id="view-d${idx}"${dayAccentStyle(day, opts.vars)} hidden>
     <div class="dayhead">
       <h2>Day ${day.id}${day.title ? ' · ' + esc(day.title) : ''}</h2>
       <p class="facts">${esc(facts.join(' · '))}</p>
-      ${sched.hotel ? `<p class="hotel">🛏 ${esc(sched.hotel.name)}${sched.bookend !== 'both' ? ' <span class="quiet">(' + (sched.bookend === 'start' ? 'start of the day only' : 'end of the day only') + ')</span>' : ''}</p>` : ''}
+      ${hotelLine ? `<p class="hotel">${hotelLine}</p>` : ''}
     </div>
     ${map}
     <div class="timeline">${body.join('')}</div>
@@ -358,7 +368,9 @@ function infoHtml(trip, opts){
 
   if(trip.hotels.length){
     cards.push(`<div class="card"><h3>🛏 Hotels</h3>` + trip.hotels.map(h => {
-      const nights = trip.days.filter(d => d.hotelId === h.id).length;
+      // A day's end hotel is where that night is spent, so counting end
+      // hotels counts the actual nights.
+      const nights = trip.days.filter(d => d.endHotelId === h.id).length;
       return `<div class="hotel-row">${photoHtml(h.img, 'hotel', h.name, opts.photos)}
         <div><p class="hotel-name">${esc(h.name)}</p>
         <p class="quiet">${nights ? nights + (nights === 1 ? ' night' : ' nights') : 'no nights assigned'}${h.mode === 'boat' ? ' · reached by boat' : ''}</p>

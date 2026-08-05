@@ -119,6 +119,7 @@ RULES
 - Put the whole document inside a single fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste — they are load-bearing. Write nothing after the block. (If I ask for a file, save the same content as .md or .txt.)
 - Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line, and a "- done: yes" line is a stop I have already visited — keep it, and don't rearrange or drop those stops unless I ask.
 - Keep every day's "- color:" line exactly as it is unless I ask to change it (valid values: rust, gold, olive, forest, teal, sea, plum, wine — it colour-codes that day in the planner).
+- Each day says where it starts and ends. "- hotel: X" means the day starts AND ends at hotel X ("none" = no hotel). A day may instead carry a "- start hotel:" / "- end hotel:" pair when its two ends differ: an arrival day has "start hotel: none", a departure day has "end hotel: none", and a hotel-change day starts at the old hotel and ends at the new one — the end hotel is where that night is spent. Keep these lines matching where the traveller actually wakes up and sleeps, and update them whenever you add, remove or reorder days, or change hotels.
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
 - Keep "## Unassigned" present and updated.
@@ -180,9 +181,13 @@ FORMAT SPECIFICATION
 
 ## Day 1: <short day title, e.g. "Ancient Rome">
 - start: <HH:MM 24h, e.g. 09:00>
-- hotel: <exact hotel name from the Hotels section, or "none">
-- hotel bookend: <optional: "both" (default — day starts and ends at the hotel) | "start" | "end" (e.g. an arrival day that only ENDS at the hotel)>
+- hotel: <exact hotel name from the Hotels section, or "none" — the day starts AND ends at this hotel (the normal case)>
 - color: <optional: rust | gold | olive | forest | teal | sea | plum | wine — colour-codes the day in the planner; if the trip spans several cities/areas, give each area its own colour>
+
+A day whose two ends differ takes TWO lines INSTEAD of the single "hotel:" line — where the day starts, and where that night is spent ("none" works at either end):
+- start hotel: <hotel the day STARTS from, or "none">
+- end hotel: <hotel the day ENDS at, or "none">
+Use this for exactly three kinds of day: an ARRIVAL day ("start hotel: none" — the day begins mid-journey — plus "end hotel:" naming the first hotel), a DEPARTURE day ("start hotel:" naming the last hotel, plus "end hotel: none" — no hotel that night), and a HOTEL-CHANGE day ("start hotel:" the old one, "end hotel:" the new one — check out of the first, sleep at the second). The planner adds the matching travel legs: the day departs from its start hotel and returns to its end hotel.
 
 ### <location name>
 - lat: <decimal latitude — REQUIRED, as accurate as you can>
@@ -200,7 +205,7 @@ For a point-to-point hike (category "hike"), also give where it ends — travel 
 - end lat: <decimal latitude of the trailhead where the hike finishes>
 - end lng: <decimal longitude>
 
-Arrival/departure days: model the flight or train as its own stop — category "flight" or "travel", at the airport/station coordinates, with "fixed start" as the landing or departure time and "duration" covering deplaning/immigration/luggage (arrivals) or the arrive-early buffer (departures). Give such days "- hotel bookend: end" (arrival) or "start" (departure).
+Arrival/departure days: model the flight or train as its own stop — category "flight" or "travel", at the airport/station coordinates, with "fixed start" as the landing or departure time and "duration" covering deplaning/immigration/luggage (arrivals) or the arrive-early buffer (departures). Give such days the "start hotel" / "end hotel" pair described above rather than a single "hotel:" line.
 
 (Repeat "## Day N: …" for every day. Include meals as category "food" stops with real restaurant recommendations. 4–8 stops per day is a realistic pace; do not overpack. Order each day's stops geographically so the day flows without backtracking.)
 

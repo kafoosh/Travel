@@ -46,10 +46,9 @@ function xmlEsc(s){
 export function dayMapPoints(trip, day){
   const sched = computeSchedule(trip, day);
   const pts = [];
-  const hotel = sched.hotel;
-  const bookend = day.bookend || 'both';
-  if(hotel && hotel.lat != null && bookend !== 'end')
-    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'Start of the day', num: null });
+  const startHotel = sched.startHotel, endHotel = sched.endHotel;
+  if(startHotel && startHotel.lat != null)
+    pts.push({ lat: startHotel.lat, lng: startHotel.lng, label: startHotel.name, cat: 'hotel', when: 'Start of the day', num: null });
   let n = 0;
   sched.rows.forEach(r => {
     const s = r.stop;
@@ -59,8 +58,8 @@ export function dayMapPoints(trip, day){
     if(s.cat === 'hike' && s.endLat != null)
       pts.push({ lat: s.endLat, lng: s.endLng, label: s.name + ' (hike end)', cat: 'hike', when: '', num: n + 'b' });
   });
-  if(hotel && hotel.lat != null && bookend !== 'start' && pts.length)
-    pts.push({ lat: hotel.lat, lng: hotel.lng, label: hotel.name, cat: 'hotel', when: 'End of the day', num: null });
+  if(endHotel && endHotel.lat != null && pts.length)
+    pts.push({ lat: endHotel.lat, lng: endHotel.lng, label: endHotel.name, cat: 'hotel', when: 'End of the day', num: null });
   return pts;
 }
 

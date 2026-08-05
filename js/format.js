@@ -48,9 +48,11 @@ export const DAY_COLORS = Object.assign(Object.create(null), {
 });
 
 export function newDay(n){
-  // bookend: which ends of the day the hotel anchors — 'both' | 'start' | 'end'
+  // startHotelId / endHotelId: where the day begins and where that night is
+  // spent — usually the same hotel, but an arrival day may have no start, a
+  // departure day no end, and a hotel-change day one of each.
   // color: a DAY_COLORS key, or null to follow the theme accent
-  return { id:n, title:'Day ' + n, start:'09:00', hotelId:null, bookend:'both', returnBy:null, color:null, order:[] };
+  return { id:n, title:'Day ' + n, start:'09:00', startHotelId:null, endHotelId:null, returnBy:null, color:null, order:[] };
 }
 
 export function blankTrip(){
@@ -133,9 +135,16 @@ export function serializeTrip(trip){
   trip.days.forEach((d, i) => {
     L.push('## Day ' + (i + 1) + ': ' + (d.title || ('Day ' + (i + 1))));
     L.push('- start: ' + (d.start || '09:00'));
-    const hotel = trip.hotels.find(h => h.id === d.hotelId);
-    L.push('- hotel: ' + (hotel ? hotel.name : 'none'));
-    if(hotel && d.bookend && d.bookend !== 'both') L.push('- hotel bookend: ' + d.bookend);
+    // One "hotel:" line when the day starts and ends at the same place (the
+    // common case); explicit start/end lines when the two ends differ.
+    const startHotel = trip.hotels.find(h => h.id === d.startHotelId) || null;
+    const endHotel = trip.hotels.find(h => h.id === d.endHotelId) || null;
+    if(startHotel === endHotel){
+      L.push('- hotel: ' + (startHotel ? startHotel.name : 'none'));
+    } else {
+      L.push('- start hotel: ' + (startHotel ? startHotel.name : 'none'));
+      L.push('- end hotel: ' + (endHotel ? endHotel.name : 'none'));
+    }
     if(d.returnBy) L.push('- return by: ' + d.returnBy);
     if(d.color) L.push('- color: ' + d.color);
     L.push('');
@@ -206,7 +215,9 @@ const KEY_ALIASES = {
   'end lat':'endLat', 'end latitude':'endLat', endlat:'endLat',
   'end lng':'endLng', 'end lon':'endLng', 'end longitude':'endLng', endlng:'endLng',
   'fixed start':'fixedStart', 'fixed time':'fixedStart', fixed:'fixedStart',
-  'hotel bookend':'bookend', bookend:'bookend',
+  'start hotel':'startHotel', starthotel:'startHotel', 'hotel start':'startHotel',
+  'end hotel':'endHotel', endhotel:'endHotel', 'hotel end':'endHotel',
+  'hotel bookend':'bookend', bookend:'bookend',   // legacy — pre-start/end-hotel files
   'arrive by':'arriveBy', arriveby:'arriveBy', 'transport to':'arriveBy', 'travel by':'arriveBy',
   'return by':'returnBy', returnby:'returnBy',
   category:'cat', cat:'cat', type:'cat',
@@ -280,7 +291,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -439,10 +450,14 @@ export function parseTrip(text){
         else if(key === 'snote' && curOptMeta) curOptMeta.note = decVal(value);
         else if(['img','desc','detail','notes','mode'].includes(key)) cur[key] = decVal(value);
       } else if(section && typeof section === 'object'){
-        // day-level metadata
+        // day-level metadata; hotel names are held raw and resolved after the
+        // whole document is read (the Hotels section may come later)
+        const noneOr = v => /^(none|no|-|)$/i.test(v) ? null : v;
         if(key === 'start' && /^\d{1,2}:\d{2}$/.test(value)) section.start = value;
-        else if(key === 'hotel') section.__hotelName = /^(none|no|-|)$/i.test(value) ? null : value;
-        else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.bookend = value.toLowerCase();
+        else if(key === 'hotel') section.__hotelName = noneOr(value);
+        else if(key === 'startHotel') section.__startHotelName = noneOr(value);
+        else if(key === 'endHotel') section.__endHotelName = noneOr(value);
+        else if(key === 'bookend' && ['both','start','end'].includes(value.toLowerCase())) section.__bookend = value.toLowerCase();
         else if(key === 'returnBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) section.returnBy = v; }
         else if(key === 'color' && DAY_COLORS[value.toLowerCase()]) section.color = value.toLowerCase();
       } else if(!section){
@@ -461,13 +476,25 @@ export function parseTrip(text){
   if(!trip.days.length) trip.days.push(newDay(1));
 
   // Resolve day → hotel references by name (case-insensitive).
+  // "- hotel: X" is the whole day's base (start AND end); "- start hotel:" /
+  // "- end hotel:" set the two ends separately and win over it. The legacy
+  // "- hotel bookend:" line narrows a "- hotel:" line to one end, so files
+  // written before start/end hotels existed import unchanged.
   trip.days.forEach(d => {
-    if(d.__hotelName){
-      const h = trip.hotels.find(h => h.name.toLowerCase() === d.__hotelName.toLowerCase());
-      if(h) d.hotelId = h.id;
-      else warnings.push('Day ' + d.id + ' names hotel "' + d.__hotelName + '" which is not in the Hotels section.');
-    }
-    delete d.__hotelName;
+    const warned = new Set();
+    const resolve = name => {
+      if(!name) return null;
+      const h = trip.hotels.find(h => h.name.toLowerCase() === name.toLowerCase());
+      if(!h && !warned.has(name.toLowerCase())){
+        warned.add(name.toLowerCase());
+        warnings.push('Day ' + d.id + ' names hotel "' + name + '" which is not in the Hotels section.');
+      }
+      return h ? h.id : null;
+    };
+    const bookend = d.__bookend || 'both';
+    d.startHotelId = resolve(('__startHotelName' in d) ? d.__startHotelName : (bookend !== 'end' ? d.__hotelName : null));
+    d.endHotelId = resolve(('__endHotelName' in d) ? d.__endHotelName : (bookend !== 'start' ? d.__hotelName : null));
+    delete d.__hotelName; delete d.__startHotelName; delete d.__endHotelName; delete d.__bookend;
   });
 
   trip.counter = stopSeq;

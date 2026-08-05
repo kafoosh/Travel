@@ -446,6 +446,9 @@ h1.title:hover{color:var(--accent-dark);}
 }
 .hotel-opt.active{background:var(--accent);color:#fff;}
 .hotel-opt:hover:not(.active){background:var(--accent-tint);}
+/* The start≠end chip: a doorway to the day editor, not a hotel itself. */
+.hotel-opt.split-opt{border-style:dashed;}
+.hotel-opt.split-opt.active{border-style:solid;}
 .map-pin.hotel-pin{border-radius:6px;transform:none;background:var(--gold) !important;}
 .map-pin.hotel-pin span{transform:none;}
 

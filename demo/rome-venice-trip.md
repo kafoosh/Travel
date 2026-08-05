@@ -28,7 +28,8 @@
 
 ## Day 1: Arrival & Trastevere
 - start: 15:00
-- hotel: none
+- start hotel: none
+- end hotel: The Tribune, JdV by Hyatt
 
 ### Check in — The Tribune, JdV by Hyatt
 - lat: 41.9053
@@ -370,7 +371,8 @@
 
 ## Day 6: Travel & Arrival
 - start: 08:00
-- hotel: none
+- start hotel: none
+- end hotel: AC Hotel Venezia by Marriott
 
 ### Train — Rome to Venice
 - lat: 45.4413
