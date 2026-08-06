@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="parchment">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<!-- Deliberately unlinked: nothing on the main site points here. The page is
+     reached by typing its URL — and the data behind it is guarded for real by
+     the Firestore rules (listing rooms is admin-UID-only; see README). -->
+<meta name="robots" content="noindex, nofollow">
+<title>Rooms — Travel Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Work+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/main.css" />
+<style>
+/* ---------- Admin dashboard (this page only) ----------
+   Everything rides on the design system in css/main.css; the styles here
+   are just the table/panel shapes the main site doesn't have. */
+.admin-wrap{ max-width:1080px; }
+
+.adm-status{
+  margin:30px auto 0; text-align:center;
+  font-family:'IBM Plex Mono', monospace; font-size:13px; color:var(--ink-soft);
+  display:flex; flex-direction:column; align-items:center; gap:14px;
+}
+.adm-status .spin{ display:inline-block; animation:adm-spin 1s linear infinite; margin-right:6px; }
+@keyframes adm-spin{ to{ transform:rotate(360deg); } }
+
+.adm-btn{
+  font-family:'IBM Plex Mono', monospace; font-size:12px;
+  color:var(--ink); background:var(--card);
+  border:1px solid var(--line); border-radius:8px;
+  padding:7px 14px; cursor:pointer;
+}
+.adm-btn:hover{ border-color:var(--accent); color:var(--accent-dark); }
+.adm-btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.adm-btn.primary:hover{ background:var(--accent-dark); border-color:var(--accent-dark); color:#fff; }
+.adm-btn.danger:hover{ border-color:var(--danger); color:var(--danger); }
+.adm-btn[disabled]{ opacity:0.5; cursor:default; }
+
+.adm-panel{
+  background:var(--paper-card); border:1px solid var(--line); border-radius:12px;
+  box-shadow:var(--shadow); padding:24px 26px; margin-top:30px;
+}
+.adm-panel h2{ font-family:'Fraunces', serif; font-size:22px; margin:0 0 10px; }
+.adm-panel p{ margin:10px 0; line-height:1.55; max-width:68ch; }
+.adm-panel .subtle{ color:var(--ink-soft); font-size:14px; }
+.adm-uid{
+  font-family:'IBM Plex Mono', monospace; font-size:13px;
+  background:var(--card); border:1px dashed var(--line); border-radius:8px;
+  padding:7px 12px; user-select:all; overflow-wrap:anywhere;
+}
+.adm-uid-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.adm-rules{
+  font-family:'IBM Plex Mono', monospace; font-size:12px; line-height:1.5;
+  background:var(--card); border:1px solid var(--line); border-radius:8px;
+  padding:14px 16px; overflow:auto; margin:8px 0 12px; max-height:340px;
+  white-space:pre; tab-size:2;
+}
+
+.adm-toolbar{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:30px; }
+#adm-filter{
+  flex:1 1 220px; min-width:180px;
+  font:inherit; font-size:14px; color:var(--ink);
+  background:var(--card); border:1px solid var(--line); border-radius:8px;
+  padding:8px 12px;
+}
+#adm-filter:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+.adm-count{ font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft); white-space:nowrap; }
+
+.adm-summary{ display:flex; gap:26px; flex-wrap:wrap; margin:20px 2px 4px; }
+.adm-summary .stat .num{ font-family:'Fraunces', serif; font-size:26px; font-weight:600; }
+.adm-summary .stat .lbl{
+  font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.1em;
+  text-transform:uppercase; color:var(--ink-soft); display:block; margin-top:2px;
+}
+
+.adm-tablewrap{
+  background:var(--card); border:1px solid var(--line); border-radius:12px;
+  box-shadow:var(--shadow); overflow-x:auto; margin-top:14px;
+}
+.adm-table{ width:100%; border-collapse:collapse; }
+.adm-table thead th{
+  font-family:'IBM Plex Mono', monospace; font-size:11px; font-weight:500;
+  letter-spacing:0.08em; text-transform:uppercase; color:var(--ink-soft);
+  text-align:left; padding:12px 12px 10px; border-bottom:2px solid var(--line);
+  white-space:nowrap;
+}
+.adm-table thead th[data-sort]{ cursor:pointer; }
+.adm-table thead th[data-sort]:hover{ color:var(--accent-dark); }
+.adm-table thead th .dir{ font-size:10px; }
+.adm-table tbody td{ padding:14px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+.adm-table tbody tr:last-child td{ border-bottom:none; }
+.adm-table tbody tr:hover td{ background:var(--paper-card); }
+.num-cell{ font-family:'IBM Plex Mono', monospace; font-size:14px; white-space:nowrap; }
+.cell-detail{ display:block; font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--ink-soft); margin-top:3px; white-space:nowrap; }
+
+.room-name{ font-family:'Fraunces', serif; font-size:17px; font-weight:600; line-height:1.25; }
+.room-sub{ color:var(--ink-soft); font-size:13px; margin-top:2px; max-width:34ch; }
+.room-meta{ display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
+.room-chip{
+  font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--ink-soft);
+  border:1px dashed var(--line); border-radius:6px; padding:2px 7px;
+}
+.room-chip.code{ user-select:all; }
+.room-chip.invalid{ color:var(--danger); border-color:var(--danger); border-style:solid; }
+.size-warn{ color:var(--danger); }
+
+.adm-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+.adm-actions .adm-btn{ padding:5px 10px; font-size:11px; text-decoration:none; display:inline-block; }
+
+.adm-empty{
+  text-align:center; color:var(--ink-soft); font-size:14px;
+  border:1px dashed var(--line); border-radius:12px;
+  padding:46px 20px; margin-top:14px; line-height:1.6;
+}
+
+.adm-foot{
+  font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--ink-soft);
+  margin-top:30px; line-height:1.8; overflow-wrap:anywhere;
+}
+
+/* Stacked cards on narrow screens: the table has no room to be a table. */
+@media (max-width: 760px){
+  .adm-tablewrap{ background:transparent; border:none; box-shadow:none; overflow:visible; }
+  .adm-table, .adm-table tbody, .adm-table tr, .adm-table td{ display:block; }
+  .adm-table thead{ display:none; }
+  .adm-table tbody tr{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    box-shadow:var(--shadow); padding:12px 16px; margin:12px 0;
+  }
+  .adm-table tbody tr:hover td{ background:transparent; }
+  .adm-table tbody td{
+    display:flex; justify-content:space-between; align-items:baseline; gap:14px;
+    padding:5px 0; border-bottom:none;
+  }
+  .adm-table tbody td::before{
+    content:attr(data-label);
+    font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:0.08em;
+    text-transform:uppercase; color:var(--ink-soft); flex:none;
+  }
+  .adm-table tbody td.cell-trip{ display:block; padding-bottom:10px; }
+  .adm-table tbody td.cell-trip::before{ content:none; }
+  .adm-table tbody td.cell-actions{ justify-content:flex-start; padding-top:10px; }
+  .adm-table tbody td.cell-actions::before{ content:none; }
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="eyebrow">Travel Planner · Admin</div>
+  <h1 class="title">Rooms</h1>
+  <p class="hero-sub">Every shared trip on this deployment.</p>
+</header>
+
+<div class="wrap admin-wrap">
+
+  <div id="adm-status" class="adm-status" role="status" aria-live="polite"></div>
+
+  <!-- Filled by js/admin.js when Firestore refuses to list: the setup panel
+       with this browser's UID and a paste-ready rules block. -->
+  <section id="adm-locked" class="adm-panel" hidden></section>
+
+  <section id="adm-main" hidden>
+    <div class="adm-toolbar">
+      <input id="adm-filter" type="search" placeholder="Filter by trip name or room code…"
+             aria-label="Filter rooms">
+      <span class="adm-count" id="adm-count"></span>
+      <button class="adm-btn" id="adm-refresh">↻ Refresh</button>
+    </div>
+
+    <div class="adm-summary" id="adm-summary"></div>
+
+    <div class="adm-tablewrap">
+      <table class="adm-table" aria-label="Shared rooms">
+        <thead>
+          <tr>
+            <th scope="col" data-sort="name">Trip <span class="dir"></span></th>
+            <th scope="col" data-sort="days">Days <span class="dir"></span></th>
+            <th scope="col" data-sort="stops">Stops <span class="dir"></span></th>
+            <th scope="col" data-sort="hotels">Hotels <span class="dir"></span></th>
+            <th scope="col" data-sort="updatedMs">Last change <span class="dir"></span></th>
+            <th scope="col" data-sort="bytes">Size <span class="dir"></span></th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="adm-rows"></tbody>
+      </table>
+    </div>
+    <div class="adm-empty" id="adm-empty" hidden></div>
+  </section>
+
+  <footer class="adm-foot" id="adm-foot"></footer>
+</div>
+
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>

@@ -24,6 +24,7 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 - **Tick stops off as you go** — a ✓ next to the bin on every stop card (and in its detail popup) marks it done: the card fades, its name is struck through, its map pin greys, and the day header counts "✓ 3 of 7 done". Nothing moves — a done stop keeps its place, its time and its number, and the schedule computes exactly as before. Auto-plan is the one thing that reads the tick: a visited stop is pinned to the day you visited it, so replanning mid-trip reshuffles what's ahead, not what's behind. It lives on the stop itself, so it travels through export/import, rides along in the offline copy, and everyone in a shared room sees the same crossed-off plan. One Undo away, like everything else.
 - **Share on demand — and sharing is saving** — an unshared trip lives only in its browser tab (a reload keeps it; a fresh tab at the bare URL always opens a new blank trip). Click "Create a share link" and the trip moves to Cloud Firestore at a stable URL: everyone holding the link edits the same plan, live, and that link is how you come back to it. Requires the one-time Firebase setup below; without it the site still works as a tab-local planner with export/import. Opening a link on a device that hasn't seen that trip before holds the first render behind a quiet "Opening the shared trip…" line rather than painting a blank *Untitled Trip* while Firestore answers — and gives up after a few seconds, so a trip that never arrives leaves a usable planner rather than a spinner.
 - **Room tools** — from Trip Info: **duplicate** the current room into a second one (a copy of the trip at a brand-new link, the original untouched — the way to fork a plan, or to cut off a link that got out), **empty** a room (wipe the itinerary, keep the room and its link), or **delete** a room outright (the shared copy is removed and the link stops working). Emptying and deleting are one Undo away on the device that did it.
+- **Rooms dashboard** — `admin.html`, linked from nowhere on the site, lists every room on the deployment: trip name, days, stops, hotels, last change, size, with open / copy link / download-`.md` / delete on each row, plus filter and sortable columns. Listing rooms would hand out every trip's link (codes are the only key), so the Firestore rules refuse it by default — the page then shows the browser's own ID and a paste-ready rules block that grants that browser access. See *The rooms dashboard* below.
 - **New trip** — a top-nav button (folded into the mobile More sheet) opens a blank, unshared trip in a new tab, the same page a bare visit to the site would show. The tab you're in is untouched either way — shared or an unsaved draft, it keeps exactly what it had.
 - **Forgiving images** — a photo URL that doesn't load never leaves a broken box: the category icon shows from the start and is only replaced once an image actually decodes. Wikimedia Commons *File:* page links are rewritten to the real file, dead thumbnail sizes fall back to the original, `http://` is upgraded, and each candidate is retried twice before the icon simply stays.
 - **Color schemes** — parchment (default), lagoon, terracotta, midnight, field-notes. The choice travels with the trip file.
@@ -122,11 +123,22 @@ Sharing uses Cloud Firestore's free tier. Until configured, the Share button exp
    rules_version = '2';
    service cloud.firestore {
      match /databases/{database}/documents {
+       // Rooms dashboard (admin.html): only these UIDs may LIST rooms.
+       // Optional — leave the placeholder if you don't use the dashboard.
+       // admin.html shows a browser its UID when Firestore refuses it.
+       function isAdmin(){
+         return request.auth != null && request.auth.uid in [
+           'PASTE-AN-ADMIN-UID-HERE'
+         ];
+       }
        match /trips/{code} {
-         // read and write must be separate rules: request.resource only
-         // exists on writes, so referencing it in a read rule denies all reads.
-         allow read: if request.auth != null
+         // get = opening one room by its code (a share link).
+         // list would let anyone enumerate every room — codes are the only
+         // key to a trip — so it's admin-only; and request.resource only
+         // exists on writes, so read and write must stay separate rules.
+         allow get: if request.auth != null
            && code.matches('^[a-z0-9]{12,40}$');
+         allow list: if isAdmin();
          allow create, update: if request.auth != null
            && code.matches('^[a-z0-9]{12,40}$')
            && request.resource.data.keys().hasOnly(['trip', 'updatedBy', 'updatedAt']);
@@ -139,11 +151,19 @@ Sharing uses Cloud Firestore's free tier. Until configured, the Share button exp
    }
    ```
 
-   Deployments set up before room deletion existed have `allow delete: if false` published; re-paste the block above to enable the button.
+   Deployments set up before room deletion existed have `allow delete: if false` published; re-paste the block above to enable the button. Rules published before the dashboard existed say `allow read` instead of the `get`/`list` split — share links work the same under either, but the dashboard needs the split (an unsplit `read` still refuses collection queries, because the rules engine can't prove the code pattern for an unbounded listing).
 
 5. Project settings → **Your apps** → add a **Web app** → copy the `firebaseConfig` object into `js/config.js` (replacing `null`).
 
 The config values are public identifiers, not secrets — the rules above are what guard the data. Room codes are 16 random characters in the URL fragment; anyone with a link can edit that trip, and links can't be revoked — to cut off a link that got out, duplicate the trip to a new room and delete the old one.
+
+### The rooms dashboard (admin.html)
+
+`/admin.html` lists every room on the deployment — trip, days, stops, hotels, last change, document size — with open / copy link / download-`.md` / delete on each row. Nothing on the main site links to it; you get there by typing the URL.
+
+On a static site an unlinked page is privacy, not protection, so the real gate is server-side: the rules above only `allow list` for UIDs named in `isAdmin()`. Opening the dashboard from a browser that isn't named shows exactly that — the page prints the browser's anonymous sign-in UID and a paste-ready copy of the rules with that UID already in the list. Paste, publish, hit *try again*. Grant more browsers the same way (the UID is per-browser and survives visits, but clearing site data rotates it — re-add the new one). Share links are untouched by all of this: single-room `get`s stay open to anyone holding a code.
+
+Notes for the row actions: **Delete** is the same server-side delete as Trip Info's — every copy of the link stops working, devices with the trip open keep their local copy and are offered *Duplicate to a new room* — but from the dashboard there's no Undo, so **.md** first makes a backup that imports back. The dashboard reads on demand (open / Refresh) rather than listening live, so leaving it open costs no Firestore reads.
 
 ### Why a device that opens a link can't wipe the room
 
@@ -168,6 +188,7 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | Path | What |
 |---|---|
 | `index.html` | Page shell and modals |
+| `admin.html` | Rooms dashboard — unlinked, admin-gated by the Firestore rules |
 | `css/main.css` | Design system; all five color schemes as CSS variables |
 | `js/format.js` | Trip model + markdown/CSV import & export (the canonical format) |
 | `js/routing.js` | Valhalla + Transitous clients, cache, heuristic fallback |
@@ -177,6 +198,7 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | `js/offline.js` | The self-contained offline export (one HTML file, no requests) |
 | `js/state.js` | Persistence, undo, normalisation |
 | `js/cloud.js` | Share-on-demand Firestore rooms (create / duplicate / delete) |
+| `js/admin.js` | The rooms dashboard behind `admin.html` |
 | `js/img.js` | Photo URL repair, retries, icon fallback |
 | `js/llm.js` | The AI-assistant prompt builder |
 | `js/config.js` | **Deployment config — paste your Firebase config here** |
