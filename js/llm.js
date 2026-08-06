@@ -148,7 +148,7 @@ RULES
 - New locations must follow the same field structure, with real lat/lng coordinates (they drive the map and travel times) and realistic durations.
 - Photos: give every stop and hotel you add an "- image:" line, and fill the gaps — where an existing stop or hotel has no "- image:" line, add one if you can source a real photo of it (see PHOTOS below). Never change or remove an image line that is already there; a photo I picked stays mine.
 - If you add or remove days, renumber "## Day N" headings sequentially and update the "- days:" count.
-- Keep "## Unassigned" present and updated.
+- Keep "## Unassigned" present and updated. An unassigned stop's "- group:" line is my own filing system — keep each stop's group line exactly as it is (and give a new unassigned stop a "- group:" line only if it clearly belongs to an existing group).
 - Keep the "## Checklist" section and every one of its "- [ ] " / "- [x] " lines exactly as they are unless I ask to change them (the "[x]" ones are already done).
 - End the document with the "## Trip Info" section described below — all five subsections, filled in.
 - Travel between stops is computed automatically — durations are visit time only.
@@ -244,6 +244,7 @@ Arrival/departure/transfer days: model the flight or train as its own stop as de
 - <same fields as any location>
 - suggested day: <day number it fits best>
 - suggestion note: <one sentence on why/when to add it>
+- group: <optional: a short header to file this idea under — an area, a theme, a maybe-pile. Stops sharing a group name appear together.>
 
 (3–8 interesting niche spots that didn't make the main plan — worth seeing, but not slotted into a day.)
 
