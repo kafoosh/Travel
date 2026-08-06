@@ -1943,6 +1943,18 @@ function optCard(o){
     (suggested ? `<span class="tag-chip sug-chip" title="A day this could fit">☞ D${o.day} · ${esc(shortTitle(suggested.title))}</span>` : '') +
     chips +
     (o.note ? `<span class="opt-note">${esc(o.note)}</span>` : '');
+  // Filing without the drag: the ▤ dropdown moves the stop into any group in
+  // place — the answer to a long ungrouped pool, where dragging to a header
+  // means a journey. Selecting "＋ New group…" makes the group on the spot.
+  // Hidden while no groups exist EXCEPT the new-group entry, which is then
+  // the whole menu — so the feature is discoverable from any card.
+  const groups = trip().optionalGroups;
+  const groupPick = `
+        <select class="opt-group-pick" title="File this stop under a group" aria-label="Group for ${esc(s.name)}">
+          <option value=""${!o.group ? ' selected' : ''}>▤ ${groups.length ? 'No group' : 'Group…'}</option>
+          ${groups.map(g => `<option value="${esc(g.id)}"${o.group === g.id ? ' selected' : ''}>▤ ${esc(g.title)}</option>`).join('')}
+          <option value="__new">＋ New group…</option>
+        </select>`;
   card.innerHTML = `
     <div class="opt-inner">
       <div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>
@@ -1952,6 +1964,7 @@ function optCard(o){
         ${metaRow ? `<div class="tag-row">${metaRow}</div>` : ''}
       </div>
       <div class="manage-row">
+        ${groupPick}
         <select class="restore-to-day" title="Day to add this stop to" aria-label="Day to add ${esc(s.name)} to">${dayOptions}</select>
         <button class="restore-btn" title="Add to the selected day">+ Add</button>
         <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">${ICON_BIN}</button>
@@ -1967,6 +1980,23 @@ function optCard(o){
   });
   card.querySelector('.restore-btn').addEventListener('click', () => {
     moveToDay(null, o.id, parseInt(card.querySelector('.restore-to-day').value, 10));
+  });
+  card.querySelector('.opt-group-pick').addEventListener('change', (e) => {
+    const v = e.target.value;
+    if(v === '__new'){
+      const name = (window.prompt('Name the new group — an area, a theme, a maybe-pile…') || '').trim();
+      if(!name){ e.target.value = o.group || ''; return; }
+      pushUndo();
+      const existing = trip().optionalGroups.find(g => g.title.toLowerCase() === name.toLowerCase());
+      let gid = existing ? existing.id : nextOptGroupId();
+      if(!existing) trip().optionalGroups.push({ id: gid, title: name, collapsed: false });
+      optMoveToGroupTail(o.id, gid);
+      saveState();
+      renderOptional();
+      updateUndoButton();
+      return;
+    }
+    optDropMove(o.id, { type: 'group', gid: v || null });
   });
   card.querySelector('.bin-btn').addEventListener('click', () => removeToBin(null, o.id));
   const handle = card.querySelector('.drag-handle');
@@ -2016,6 +2046,21 @@ function optDragHit(sourceCard, x, y){
   return null;
 }
 
+/* Re-file a stop at the tail of a group (null = the ungrouped pool). Pure
+   array surgery — callers own the undo push, save and render. */
+function optMoveToGroupTail(id, gid){
+  const list = trip().optional;
+  const from = list.findIndex(o => o.id === id);
+  if(from < 0) return false;
+  const [entry] = list.splice(from, 1);
+  entry.group = gid || null;
+  let last = -1;
+  list.forEach((o, i) => { if((o.group || null) === (gid || null)) last = i; });
+  if(last === -1) list.push(entry);
+  else list.splice(last + 1, 0, entry);
+  return true;
+}
+
 /* Apply a drop on the Unassigned page: beside another card (taking that
    card's group) or onto a group (joining its tail). */
 function optDropMove(id, act){
@@ -2024,18 +2069,14 @@ function optDropMove(id, act){
   if(from < 0) return;
   if(act.type === 'card' && act.id === id) return;
   pushUndo();
-  const [entry] = list.splice(from, 1);
   if(act.type === 'card'){
+    const [entry] = list.splice(from, 1);
     const ti = list.findIndex(o => o.id === act.id);
     if(ti < 0){ list.splice(from, 0, entry); state.undoStack.pop(); return; }
     entry.group = list[ti].group || null;
     list.splice(act.before ? ti : ti + 1, 0, entry);
   } else {
-    entry.group = act.gid || null;
-    let last = -1;
-    list.forEach((o, i) => { if((o.group || null) === (act.gid || null)) last = i; });
-    if(last === -1) list.push(entry);
-    else list.splice(last + 1, 0, entry);
+    optMoveToGroupTail(id, act.gid || null);
   }
   saveState();
   renderOptional();
