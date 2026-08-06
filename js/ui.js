@@ -38,7 +38,6 @@ const THEME_PREVIEW = {
   'field-notes':['#F1EEE2','#4A6B3A','#A98A2F'],
 };
 
-let dragSourceId = null;
 let lastFocusedEl = null;
 let leafletMap = null;
 let mapLayerGroup = null;
@@ -74,6 +73,187 @@ const currentDay = () => {
   state.currentDayIndex = Math.max(0, Math.min(state.currentDayIndex, trip().days.length - 1));
   return trip().days[state.currentDayIndex];
 };
+
+/* =========================================================
+   POINTER-DRAG ENGINE
+   One drag for every card list — mouse and touch alike.
+   HTML5 drag-and-drop remains only where a drag must read as
+   a foreign flavour (unassigned-tray chips dropped onto days,
+   day tabs reordering the trip); the cards themselves move
+   with pointer events, which native DnD served badly: no page
+   auto-scroll at all in some browsers (a card could never
+   travel further than one screen), a drag image that can't be
+   styled, and nothing on touch.
+
+   Every list gets the same behaviour from here:
+   - a ghost of the card riding under the finger/cursor
+   - drop marks painted on whatever the pointer is over
+   - edge auto-scroll that KEEPS scrolling while the pointer
+     holds still near an edge, at a speed scaled to how deep
+     into the zone it sits (the old touch path only scrolled
+     while the finger kept moving)
+   - Escape drops the drag harmlessly
+   ========================================================= */
+const EDGE_ZONE = 90;          // px band near each edge where auto-scroll engages
+const EDGE_MAX_SPEED = 26;     // px per frame at full depth
+
+let liveDrag = null;           // one drag at a time, engine-wide
+
+function swallowEvent(e){ e.preventDefault(); e.stopPropagation(); }
+
+function clearDropMarks(){
+  document.querySelectorAll('.drop-before, .drop-after, .drop-target')
+    .forEach(el => el.classList.remove('drop-before', 'drop-after', 'drop-target'));
+}
+
+/* The auto-scroll hot zones start where the pinned chrome ends — under the
+   sticky action bar / day strip / pane switch, above the fixed mobile nav —
+   because a pointer over chrome sees bars, not cards. Measured live: the
+   bars come and go with view and viewport. */
+function dragChromeEdges(){
+  let top = 0, bottom = 0;
+  ['.tl-actions', '.daytabs-wrap', '.view-switch'].forEach(sel => {
+    const el = document.querySelector(sel);
+    if(!el) return;
+    const pos = getComputedStyle(el).position;
+    if(pos !== 'sticky' && pos !== 'fixed') return;
+    const r = el.getBoundingClientRect();
+    if(r.height > 0 && r.top < window.innerHeight * 0.5) top = Math.max(top, r.bottom);
+  });
+  const nav = document.querySelector('.tl-views');
+  if(nav && getComputedStyle(nav).position === 'fixed'){
+    const r = nav.getBoundingClientRect();
+    if(r.height > 0) bottom = window.innerHeight - r.top;
+  }
+  return { top, bottom };
+}
+
+/* Between cards sits other markup (travel connectors, section heads, list
+   padding): a drop there should mean "next to the nearest card", not
+   nothing. Returns { el, before } or null. */
+function nearestRowTo(container, y, selector, exclude){
+  let best = null, bestDist = Infinity;
+  container.querySelectorAll(selector).forEach(el => {
+    if(el === exclude) return;
+    const r = el.getBoundingClientRect();
+    if(!r.height) return;
+    const mid = r.top + r.height / 2;
+    const d = Math.abs(y - mid);
+    if(d < bestDist){ bestDist = d; best = { el, before: y < mid }; }
+  });
+  return best;
+}
+
+/* cfg: {
+     source: element the drag lifts (dimmed in place, cloned as the ghost),
+     hitTest(x, y) -> { el, mark: 'before'|'after'|'into', act } | null,
+     commit(act): apply the drop — called only after a real lift, on a target
+   } */
+function beginCardDrag(ev, cfg){
+  if(liveDrag) return;
+  if(ev.pointerType === 'mouse' && ev.button !== 0) return;
+  ev.preventDefault();
+  const source = cfg.source;
+  const startX = ev.clientX, startY = ev.clientY;
+  const drag = liveDrag = { x: startX, y: startY, lifted: false, target: null, ghost: null, raf: 0 };
+  try{ ev.target.setPointerCapture(ev.pointerId); } catch(e){}
+
+  const placeGhost = () => {
+    if(drag.ghost) drag.ghost.style.transform =
+      'translate(' + Math.round(drag.x - drag.grabX) + 'px,' + Math.round(drag.y - drag.grabY) + 'px)';
+  };
+
+  const updateTarget = () => {
+    const t = cfg.hitTest(drag.x, drag.y) || null;
+    clearDropMarks();
+    drag.target = t;
+    if(t) t.el.classList.add(t.mark === 'before' ? 'drop-before' : t.mark === 'after' ? 'drop-after' : 'drop-target');
+  };
+
+  const lift = () => {
+    drag.lifted = true;
+    const r = source.getBoundingClientRect();
+    // keep the grab point inside the ghost even when the press was at its edge
+    drag.grabX = Math.min(Math.max(startX - r.left, 10), Math.max(r.width - 10, 10));
+    drag.grabY = Math.min(Math.max(startY - r.top, 6), Math.max(r.height - 6, 6));
+    const ghost = source.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.style.width = r.width + 'px';
+    document.body.appendChild(ghost);
+    drag.ghost = ghost;
+    source.classList.add('drag-source');
+    document.body.classList.add('drag-active');
+    document.addEventListener('contextmenu', swallowEvent, true);   // a long-press menu would strand the drag
+    placeGhost();
+    drag.raf = requestAnimationFrame(tick);
+  };
+
+  // Auto-scroll runs on animation frames, not on pointermove: a pointer held
+  // still inside the zone keeps scrolling, and the drop marks track the
+  // content sliding beneath it.
+  const tick = () => {
+    if(liveDrag !== drag) return;
+    const { top, bottom } = dragChromeEdges();
+    const topEdge = top + EDGE_ZONE;
+    const bottomEdge = window.innerHeight - bottom - EDGE_ZONE;
+    let dy = 0;
+    if(drag.y < topEdge) dy = -EDGE_MAX_SPEED * Math.min(1, (topEdge - drag.y) / EDGE_ZONE);
+    else if(drag.y > bottomEdge) dy = EDGE_MAX_SPEED * Math.min(1, (drag.y - bottomEdge) / EDGE_ZONE);
+    if(dy){
+      const was = window.scrollY;
+      window.scrollBy(0, dy);
+      if(window.scrollY !== was) updateTarget();
+    }
+    drag.raf = requestAnimationFrame(tick);
+  };
+
+  const onMove = (mv) => {
+    if(mv.pointerId !== ev.pointerId) return;
+    drag.x = mv.clientX; drag.y = mv.clientY;
+    if(!drag.lifted){
+      if(Math.abs(drag.x - startX) + Math.abs(drag.y - startY) < 5) return;
+      lift();
+    }
+    placeGhost();
+    updateTarget();
+  };
+  const onUp = (up) => { if(up.pointerId === ev.pointerId) settle(true); };
+  const onCancel = (cv) => { if(cv.pointerId === ev.pointerId) settle(false); };
+  const onKey = (e) => {
+    if(e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    settle(false);
+  };
+
+  const settle = (commit) => {
+    cancelAnimationFrame(drag.raf);
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    document.removeEventListener('pointercancel', onCancel);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('contextmenu', swallowEvent, true);
+    if(drag.ghost) drag.ghost.remove();
+    source.classList.remove('drag-source');
+    document.body.classList.remove('drag-active');
+    clearDropMarks();
+    const target = drag.target;
+    const lifted = drag.lifted;
+    liveDrag = null;
+    if(!lifted) return;   // never left the press — the element's own click handles it
+    // The pointerup still synthesises a click on whatever sits under it
+    // (which can be a different card after auto-scroll) — swallow anything
+    // arriving in this same task.
+    document.addEventListener('click', swallowEvent, true);
+    setTimeout(() => document.removeEventListener('click', swallowEvent, true), 0);
+    if(commit && target) cfg.commit(target.act);
+  };
+
+  document.addEventListener('pointermove', onMove);
+  document.addEventListener('pointerup', onUp);
+  document.addEventListener('pointercancel', onCancel);
+  document.addEventListener('keydown', onKey, true);
+}
 
 /* =========================================================
    THEME + HERO
@@ -140,6 +320,7 @@ function renderTabs(){
     const btn = document.createElement('div');
     btn.className = 'daytab' + (i === state.currentDayIndex ? ' active' : '');
     if(d.color && DAY_COLORS[d.color]) btn.dataset.dayColor = d.color;
+    btn.dataset.dayIdx = i;   // pointer-dragged stop cards drop here to change day
     btn.draggable = true;
     btn.tabIndex = 0;
     btn.title = 'Drag to reorder the trip (or focus and press Shift + ← / →)';
@@ -690,7 +871,6 @@ function renderScheduleList(day, sched){
     const card = document.createElement('div');
     card.className = 'stop-card' + (s.cat === 'travel' || s.cat === 'boat' ? ' travel-row' : '') +
       (s.done ? ' done' : '') + (s.hidden ? ' off-map' : '');
-    card.draggable = false;
     card.dataset.id = s.id;
 
     // A hidden stop still takes its number: the numbers left on the map are
@@ -772,18 +952,7 @@ function renderScheduleList(day, sched){
       }
     });
 
-    // --- HTML5 drag (desktop) ---
-    card.addEventListener('dragstart', e => {
-      dragSourceId = s.id;
-      card.classList.add('dragging');
-      e.dataTransfer.setData('text/plain', s.id);
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.draggable = false;
-      card.classList.remove('dragging');
-      document.querySelectorAll('.stop-card').forEach(c => c.classList.remove('drop-before','drop-after'));
-    });
+    // --- HTML5 drop target (chips dragged in from the Unassigned tray) ---
     card.addEventListener('dragover', e => {
       e.preventDefault();
       const rect = card.getBoundingClientRect();
@@ -801,10 +970,19 @@ function renderScheduleList(day, sched){
       card.classList.remove('drop-before','drop-after');
     });
 
+    // --- pointer drag (mouse + touch alike), from the handle ---
     const handle = card.querySelector('.drag-handle');
     handle.addEventListener('click', (e) => e.stopPropagation());
-    handle.addEventListener('mousedown', () => { card.draggable = true; });
-    handle.addEventListener('mouseup', () => { card.draggable = false; });
+    handle.addEventListener('pointerdown', (ev) => beginCardDrag(ev, {
+      source: card,
+      hitTest: (x, y) => scheduleDragHit(day, card, x, y),
+      commit: (act) => {
+        if(act.type === 'reorder') reorder(day, s.id, act.id, act.before);
+        else if(act.type === 'append') reorder(day, s.id, null, false);
+        else if(act.type === 'day') moveToDay(day, s.id, act.dayId);
+        else if(act.type === 'optional') moveToOptional(day, s.id);
+      },
+    }));
 
     // --- Keyboard reorder ---
     handle.addEventListener('keydown', (e) => {
@@ -814,48 +992,6 @@ function renderScheduleList(day, sched){
       moveStop(day, s.id, e.key === 'ArrowUp' ? -1 : 1);
       const moved = document.querySelector(`.stop-card[data-id="${CSS.escape(s.id)}"] .drag-handle`);
       if(moved) moved.focus();
-    });
-
-    // --- Touch drag ---
-    handle.addEventListener('pointerdown', (ev) => {
-      if(ev.pointerType === 'mouse') return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      card.classList.add('touch-dragging');
-      let lastTarget = null, lastBefore = false;
-      const onMove = (mv) => {
-        const el = document.elementFromPoint(mv.clientX, mv.clientY);
-        const overCard = el && el.closest ? el.closest('.stop-card') : null;
-        document.querySelectorAll('.stop-card').forEach(c => c.classList.remove('drop-before','drop-after'));
-        if(overCard && overCard !== card){
-          const r = overCard.getBoundingClientRect();
-          const before = (mv.clientY - r.top) < r.height / 2;
-          overCard.classList.toggle('drop-before', before);
-          overCard.classList.toggle('drop-after', !before);
-          lastTarget = overCard.dataset.id;
-          lastBefore = before;
-        } else {
-          lastTarget = null;
-        }
-        // The bottom auto-scroll zone sits above the fixed mobile nav bar,
-        // otherwise the bar swallows the entire hot zone.
-        const nav = document.querySelector('.tl-views');
-        const navH = nav && getComputedStyle(nav).position === 'fixed' ? nav.offsetHeight : 0;
-        const margin = 70;
-        if(mv.clientY < margin) window.scrollBy(0, -12);
-        else if(mv.clientY > window.innerHeight - navH - margin) window.scrollBy(0, 12);
-      };
-      const onUp = () => {
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        document.removeEventListener('pointercancel', onUp);
-        card.classList.remove('touch-dragging');
-        document.querySelectorAll('.stop-card').forEach(c => c.classList.remove('drop-before','drop-after'));
-        if(lastTarget) reorder(day, s.id, lastTarget, lastBefore);
-      };
-      document.addEventListener('pointermove', onMove, { passive:true });
-      document.addEventListener('pointerup', onUp);
-      document.addEventListener('pointercancel', onUp);
     });
 
     list.appendChild(card);
@@ -894,6 +1030,38 @@ function parseTimeStr(str){
 }
 
 function shortTitle(t){ return t.length > 18 ? t.slice(0, 17) + '…' : t; }
+
+/* Where a day-view card drag can land: another card (before/after), the list
+   itself (append — also the way into an empty day), another day's tab in the
+   strip (move it to that day), or the Unassigned tray. */
+function scheduleDragHit(day, sourceCard, x, y){
+  const el = document.elementFromPoint(x, y);
+  if(!el || !el.closest) return null;
+  const tab = el.closest('.daytab[data-day-idx]');
+  if(tab){
+    const target = trip().days[Number(tab.dataset.dayIdx)];
+    if(target && target.id !== day.id) return { el: tab, mark: 'into', act: { type: 'day', dayId: target.id } };
+    return null;
+  }
+  const tray = el.closest('.unassigned-tray');
+  if(tray) return { el: tray, mark: 'into', act: { type: 'optional' } };
+  const list = $('schedule-list');
+  if(!list) return null;
+  const over = el.closest('.stop-card');
+  if(over === sourceCard) return null;
+  if(over && over.dataset.id && list.contains(over)){
+    const r = over.getBoundingClientRect();
+    const before = y < r.top + r.height / 2;
+    return { el: over, mark: before ? 'before' : 'after', act: { type: 'reorder', id: over.dataset.id, before } };
+  }
+  if(el.closest('#schedule-list')){
+    const near = nearestRowTo(list, y, '.stop-card', sourceCard);
+    if(near) return { el: near.el, mark: near.before ? 'before' : 'after',
+      act: { type: 'reorder', id: near.el.dataset.id, before: near.before } };
+    return { el: list, mark: 'into', act: { type: 'append' } };
+  }
+  return null;
+}
 
 /* Collapsible tray of unassigned stops. Chips are draggable onto a day's
    schedule (or, in All Stops, onto a day heading). Clicking a chip adds it
@@ -1042,7 +1210,7 @@ function moveToOptional(day, id){
   pushUndo();
   if(day) day.order = day.order.filter(x => x !== id);
   trip().bin = trip().bin.filter(x => x !== id);
-  if(!trip().optional.some(o => o.id === id)) trip().optional.push({ id, day:null, note:'' });
+  if(!trip().optional.some(o => o.id === id)) trip().optional.push({ id, day:null, note:'', group:null });
   saveState();
   renderAll();
 }
@@ -1388,6 +1556,7 @@ function refreshEndPointFields(){
 }
 
 export function openLocationForm(editStopId, defaultDayId){
+  pendingOptionalGroup = null;   // a group head's ＋ sets this again right after
   const catSel = $('al-cat');
   catSel.innerHTML = CATEGORIES.map(c => `<option value="${c}">${CAT_LABEL[c]}</option>`).join('');
   $('add-location-form').reset();
@@ -1480,7 +1649,7 @@ function submitLocationForm(e){
     trip().days.forEach(d => { d.order = d.order.filter(x => x !== id); });
     trip().optional = trip().optional.filter(o => o.id !== id);
     trip().bin = trip().bin.filter(x => x !== id);
-    if(dest === 'optional') trip().optional.push({ id, day:null, note:'' });
+    if(dest === 'optional') trip().optional.push({ id, day:null, note:'', group: pendingOptionalGroup });
     else {
       const d = trip().days.find(d => d.id === parseInt(dest, 10)) || trip().days[0];
       d.order.push(id);
@@ -1650,46 +1819,357 @@ function deleteHotel(hotelId){
 }
 
 /* =========================================================
-   OPTIONAL + BIN VIEWS
+   OPTIONAL (UNASSIGNED) + BIN VIEWS
+   The Unassigned page files its stops under user-made group
+   headers ("Rainy day", "North of the river", a maybe-pile…):
+   create, rename, dissolve, collapse, reorder. Cards drag
+   between groups and reorder inside one with the same engine
+   the schedule uses. The ungrouped pool renders first once
+   any group exists — it's where new arrivals land.
    ========================================================= */
+let ungroupedCollapsed = false;   // session-only: the pool has no group object to persist on
+let pendingOptionalGroup = null;  // a group head's ＋ files the next added stop here
+
+function nextOptGroupId(){
+  let n = 1;
+  while(trip().optionalGroups.some(g => g.id === 'g' + n)) n++;
+  return 'g' + n;
+}
+
+/* Sections in display order. One anonymous section (the whole list) while no
+   groups exist; the ungrouped pool + one per group once they do. Shared by
+   the renderer, the drag targets and the keyboard moves so all three agree
+   on what "up" means. */
+function optSections(){
+  const groups = trip().optionalGroups;
+  if(!groups.length) return [{ gid: null, group: null }];
+  return [{ gid: null, group: null }, ...groups.map(g => ({ gid: g.id, group: g }))];
+}
+
+function optItemsOf(gid){
+  const t = trip();
+  return t.optional.filter(o => t.stops[o.id] && (o.group || null) === gid);
+}
+
 function renderOptional(){
   const el = $('optional-list');
   if(!el) return;
   el.innerHTML = '';
-  if(!trip().optional.length){
-    el.innerHTML = `<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">Nothing unassigned. Use "Move to… → Unassigned" on any stop, choose "Unassigned" when adding a location, or include an "## Unassigned" section in an imported trip.</p>`;
+  const hasGroups = trip().optionalGroups.length > 0;
+  if(!trip().optional.length && !hasGroups){
+    el.innerHTML = `<p class="opt-page-empty">Nothing unassigned yet. Park ideas here with <b>+ Add stop</b>, send an existing one over with “Move to… → Unassigned”, or make headers with <b>▤ New group</b> and fill them up. An imported trip's “## Unassigned” section lands here too.</p>`;
     return;
   }
-  trip().optional.forEach(o => {
-    const s = trip().stops[o.id];
-    if(!s) return;
-    const row = document.createElement('div');
-    row.className = 'bin-row';
-    const dayOptions = trip().days.map(d =>
-      `<option value="${d.id}" ${d.id === o.day ? 'selected' : ''}>D${d.id} — ${esc(d.title)}</option>`).join('');
-    const suggested = o.day && trip().days.find(d => d.id === o.day);
-    row.innerHTML = `
+  optSections().forEach(sec => el.appendChild(optGroupSection(sec, hasGroups)));
+}
+
+function optGroupSection({ gid, group }, hasGroups){
+  const items = optItemsOf(gid);
+  const sec = document.createElement('section');
+  sec.className = 'opt-group';
+  sec.dataset.group = gid || '';
+  const collapsed = group ? group.collapsed : ungroupedCollapsed;
+  if(hasGroups && collapsed) sec.classList.add('collapsed');
+
+  if(hasGroups){
+    const head = document.createElement('div');
+    head.className = 'og-head' + (group ? '' : ' og-pool');
+    head.dataset.group = gid || '';
+    head.innerHTML = `
+      ${group ? `<span class="og-grip" title="Drag to reorder groups (or focus and press ↑ / ↓)" role="button" tabindex="0" aria-label="Reorder group ${esc(group.title)}: drag, or press arrow up and arrow down">⠿</span>` : ''}
+      <span class="og-caret" aria-hidden="true">▾</span>
+      <span class="og-title">${group ? esc(group.title) : 'Ungrouped'}</span>
+      <span class="og-count${items.length ? '' : ' zero'}">${items.length}</span>
+      <span class="og-actions">
+        <button type="button" class="og-btn og-add" title="${group ? 'Add a stop straight into this group' : 'Add an ungrouped stop'}">＋</button>
+        ${group ? `
+        <button type="button" class="og-btn og-rename" title="Rename this group">✎</button>
+        <button type="button" class="og-btn og-del" title="Dissolve this group — its stops stay, ungrouped">✕</button>` : ''}
+      </span>`;
+    head.addEventListener('click', (e) => {
+      if(e.target.closest('.og-btn') || e.target.closest('.og-grip')) return;
+      if(group){ group.collapsed = !group.collapsed; saveState(); }
+      else ungroupedCollapsed = !ungroupedCollapsed;
+      renderOptional();
+    });
+    head.querySelector('.og-add').addEventListener('click', () => {
+      openLocationForm(null, 'optional');   // clears pendingOptionalGroup — set after
+      pendingOptionalGroup = gid;
+    });
+    if(group){
+      head.querySelector('.og-rename').addEventListener('click', () => startGroupRename(group, head));
+      head.querySelector('.og-del').addEventListener('click', () => dissolveGroup(group.id));
+      const grip = head.querySelector('.og-grip');
+      grip.addEventListener('pointerdown', (ev) => beginCardDrag(ev, {
+        source: sec,
+        hitTest: (x, y) => groupDragHit(sec, x, y),
+        commit: (act) => moveGroup(group.id, act.gid, act.before),
+      }));
+      grip.addEventListener('keydown', (e) => {
+        if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        nudgeGroup(group.id, e.key === 'ArrowUp' ? -1 : 1);
+      });
+    }
+    sec.appendChild(head);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'og-body';
+  if(!items.length){
+    const hint = document.createElement('p');
+    hint.className = 'og-empty';
+    hint.textContent = group ? 'Empty group — drag stops here, or add one with ＋ above.'
+      : 'Nothing ungrouped — drag a stop here to take it out of its group.';
+    body.appendChild(hint);
+  } else {
+    items.forEach(o => body.appendChild(optCard(o)));
+  }
+  sec.appendChild(body);
+  return sec;
+}
+
+function optCard(o){
+  const s = trip().stops[o.id];
+  const card = document.createElement('div');
+  card.className = 'opt-card' + (s.done ? ' done' : '');
+  card.dataset.id = o.id;
+  const suggested = o.day ? trip().days.find(d => d.id === o.day) : null;
+  const dayOptions = trip().days.map(d =>
+    `<option value="${d.id}" ${d.id === o.day ? 'selected' : ''}>D${d.id} — ${esc(shortTitle(d.title))}</option>`).join('');
+  const chips = s.tags.map(tg => `<span class="tag-chip">${esc(tg)}</span>`).join('') +
+    (s.notes ? `<span class="tag-chip note-chip" title="${esc(s.notes)}">📝 note</span>` : '');
+  const metaRow =
+    (suggested ? `<span class="tag-chip sug-chip" title="A day this could fit">☞ D${o.day} · ${esc(shortTitle(suggested.title))}</span>` : '') +
+    chips +
+    (o.note ? `<span class="opt-note">${esc(o.note)}</span>` : '');
+  card.innerHTML = `
+    <div class="opt-inner">
       <div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>
       <div class="stop-main">
         <p class="stop-name">${esc(s.name)}</p>
-        <p class="stop-desc">${esc(s.desc)}</p>
-        ${suggested || o.note ? `<p class="stop-desc" style="font-style:italic;">${suggested ? 'Suggested: Day ' + o.day + ' — ' + esc(suggested.title) + '. ' : ''}${esc(o.note || '')}</p>` : ''}
+        ${s.desc ? `<p class="stop-desc">${esc(s.desc)}</p>` : ''}
+        ${metaRow ? `<div class="tag-row">${metaRow}</div>` : ''}
       </div>
       <div class="manage-row">
-        <select class="restore-to-day">${dayOptions}</select>
-        <button class="restore-btn">+ Add</button>
-        <button class="bin-btn" title="Remove to bin">${ICON_BIN}</button>
+        <select class="restore-to-day" title="Day to add this stop to" aria-label="Day to add ${esc(s.name)} to">${dayOptions}</select>
+        <button class="restore-btn" title="Add to the selected day">+ Add</button>
+        <button class="bin-btn" title="Remove to bin" aria-label="Remove ${esc(s.name)} to bin">${ICON_BIN}</button>
       </div>
-    `;
-    row.querySelector('.stop-main').style.cursor = 'pointer';
-    row.querySelector('.stop-main').addEventListener('click', () => openModal(o.id, null));
-    row.querySelector('.restore-btn').addEventListener('click', () => {
-      const targetDayId = parseInt(row.querySelector('.restore-to-day').value, 10);
-      moveToDay(null, o.id, targetDayId);
-    });
-    row.querySelector('.bin-btn').addEventListener('click', () => removeToBin(null, o.id));
-    el.appendChild(row);
+    </div>
+    <span class="drag-handle" title="Drag to reorder or regroup (or focus and press ↑ / ↓)" role="button" tabindex="0" aria-label="Move ${esc(s.name)}: drag, or press arrow up and arrow down">⠿</span>`;
+  if(s.img) mountImage(card.querySelector('.stop-illustration'), s.img, ICONS[s.cat] || '📍', { alt: s.name });
+  card.addEventListener('click', (e) => {
+    if(e.target.closest('.manage-row') || e.target.closest('.drag-handle')) return;
+    const selObj = window.getSelection();
+    if(selObj && !selObj.isCollapsed && selObj.toString().trim() && card.contains(selObj.anchorNode)) return;
+    openModal(o.id, null);
   });
+  card.querySelector('.restore-btn').addEventListener('click', () => {
+    moveToDay(null, o.id, parseInt(card.querySelector('.restore-to-day').value, 10));
+  });
+  card.querySelector('.bin-btn').addEventListener('click', () => removeToBin(null, o.id));
+  const handle = card.querySelector('.drag-handle');
+  handle.addEventListener('click', (e) => e.stopPropagation());
+  handle.addEventListener('pointerdown', (ev) => beginCardDrag(ev, {
+    source: card,
+    hitTest: (x, y) => optDragHit(card, x, y),
+    commit: (act) => optDropMove(o.id, act),
+  }));
+  handle.addEventListener('keydown', (e) => {
+    if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    e.stopPropagation();
+    optKeyMove(o.id, e.key === 'ArrowUp' ? -1 : 1);
+  });
+  return card;
+}
+
+/* Where an Unassigned-page card drag can land: another card (before/after,
+   adopting its group), a group header or body (into that group's tail — the
+   way into an empty or collapsed one), or back to the ungrouped pool. */
+function optDragHit(sourceCard, x, y){
+  const el = document.elementFromPoint(x, y);
+  if(!el || !el.closest) return null;
+  const head = el.closest('.og-head');
+  if(head) return { el: head, mark: 'into', act: { type: 'group', gid: head.dataset.group || null } };
+  const over = el.closest('.opt-card');
+  if(over === sourceCard) return null;
+  if(over && over.dataset.id){
+    const r = over.getBoundingClientRect();
+    const before = y < r.top + r.height / 2;
+    return { el: over, mark: before ? 'before' : 'after', act: { type: 'card', id: over.dataset.id, before } };
+  }
+  const secEl = el.closest('.opt-group');
+  if(secEl){
+    const near = nearestRowTo(secEl, y, '.opt-card', sourceCard);
+    if(near) return { el: near.el, mark: near.before ? 'before' : 'after',
+      act: { type: 'card', id: near.el.dataset.id, before: near.before } };
+    return { el: secEl.querySelector('.og-body') || secEl, mark: 'into', act: { type: 'group', gid: secEl.dataset.group || null } };
+  }
+  const list = $('optional-list');
+  if(list && el.closest('#optional-list')){
+    const near = nearestRowTo(list, y, '.opt-card', sourceCard);
+    if(near) return { el: near.el, mark: near.before ? 'before' : 'after',
+      act: { type: 'card', id: near.el.dataset.id, before: near.before } };
+  }
+  return null;
+}
+
+/* Apply a drop on the Unassigned page: beside another card (taking that
+   card's group) or onto a group (joining its tail). */
+function optDropMove(id, act){
+  const list = trip().optional;
+  const from = list.findIndex(o => o.id === id);
+  if(from < 0) return;
+  if(act.type === 'card' && act.id === id) return;
+  pushUndo();
+  const [entry] = list.splice(from, 1);
+  if(act.type === 'card'){
+    const ti = list.findIndex(o => o.id === act.id);
+    if(ti < 0){ list.splice(from, 0, entry); state.undoStack.pop(); return; }
+    entry.group = list[ti].group || null;
+    list.splice(act.before ? ti : ti + 1, 0, entry);
+  } else {
+    entry.group = act.gid || null;
+    let last = -1;
+    list.forEach((o, i) => { if((o.group || null) === (act.gid || null)) last = i; });
+    if(last === -1) list.push(entry);
+    else list.splice(last + 1, 0, entry);
+  }
+  saveState();
+  renderOptional();
+  updateUndoButton();
+}
+
+/* Keyboard companion to the drag: ↑/↓ walks a card through the page's
+   display order; crossing a section boundary re-files it under that header
+   first (the card holds its screen position), then keeps moving. */
+function optKeyMove(id, delta){
+  const seq = optSections().flatMap(sec => optItemsOf(sec.gid));
+  const i = seq.findIndex(o => o.id === id);
+  if(i < 0) return;
+  const j = i + delta;
+  if(j < 0 || j >= seq.length) return;
+  pushUndo();
+  const a = seq[i], b = seq[j];
+  if((a.group || null) === (b.group || null)){
+    seq.splice(i, 1);
+    seq.splice(j, 0, a);
+  } else {
+    a.group = b.group || null;
+    seq.splice(i, 1);
+    const bi = seq.indexOf(b);
+    seq.splice(delta > 0 ? bi : bi + 1, 0, a);
+  }
+  // entries whose stop vanished aren't in any section — carry them over
+  if(seq.length !== trip().optional.length){
+    const inSeq = new Set(seq.map(o => o.id));
+    trip().optional.forEach(o => { if(!inSeq.has(o.id)) seq.push(o); });
+  }
+  trip().optional = seq;
+  saveState();
+  renderOptional();
+  updateUndoButton();
+  const moved = document.querySelector(`.opt-card[data-id="${CSS.escape(id)}"] .drag-handle`);
+  if(moved) moved.focus();
+}
+
+function startGroupRename(group, head){
+  const titleEl = head.querySelector('.og-title');
+  if(!titleEl) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'og-rename-input';
+  input.value = group.title;
+  input.maxLength = 60;
+  input.setAttribute('aria-label', 'Group name');
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let settled = false;
+  const commit = () => {
+    if(settled) return;
+    settled = true;
+    const v = input.value.trim();
+    if(v && v !== group.title){
+      pushUndo();
+      group.title = v;
+      saveState();
+      updateUndoButton();
+    }
+    renderOptional();
+  };
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();   // Escape here means "stop renaming", not "close a modal"
+    if(e.key === 'Enter'){ e.preventDefault(); commit(); }
+    else if(e.key === 'Escape'){ e.preventDefault(); settled = true; renderOptional(); }
+  });
+  input.addEventListener('blur', commit);
+  input.addEventListener('click', (e) => e.stopPropagation());
+  input.addEventListener('pointerdown', (e) => e.stopPropagation());
+}
+
+function addOptionalGroup(){
+  pushUndo();
+  const id = nextOptGroupId();
+  trip().optionalGroups.push({ id, title: 'New group', collapsed: false });
+  saveState();
+  renderOptional();
+  updateUndoButton();
+  // straight into naming it — a header called "New group" helps nobody
+  const head = document.querySelector(`.og-head[data-group="${id}"]`);
+  const group = trip().optionalGroups.find(g => g.id === id);
+  if(head && group) startGroupRename(group, head);
+}
+
+function dissolveGroup(gid){
+  pushUndo();
+  trip().optionalGroups = trip().optionalGroups.filter(g => g.id !== gid);
+  trip().optional.forEach(o => { if(o.group === gid) o.group = null; });
+  saveState();
+  renderOptional();
+  updateUndoButton();
+}
+
+function moveGroup(gid, targetGid, before){
+  if(!targetGid || gid === targetGid) return;
+  const gs = trip().optionalGroups;
+  const from = gs.findIndex(g => g.id === gid);
+  if(from < 0 || !gs.some(g => g.id === targetGid)) return;
+  pushUndo();
+  const [g] = gs.splice(from, 1);
+  const to = gs.findIndex(x => x.id === targetGid);
+  gs.splice(before ? to : to + 1, 0, g);
+  saveState();
+  renderOptional();
+  updateUndoButton();
+}
+
+function nudgeGroup(gid, delta){
+  const gs = trip().optionalGroups;
+  const i = gs.findIndex(g => g.id === gid);
+  const j = i + delta;
+  if(i < 0 || j < 0 || j >= gs.length) return;
+  pushUndo();
+  [gs[i], gs[j]] = [gs[j], gs[i]];
+  saveState();
+  renderOptional();
+  updateUndoButton();
+  const grip = document.querySelector(`.og-head[data-group="${gid}"] .og-grip`);
+  if(grip) grip.focus();
+}
+
+/* Where a group-header drag can land: before/after another group's section.
+   The ungrouped pool is pinned first and isn't a target. */
+function groupDragHit(sourceSec, x, y){
+  const el = document.elementFromPoint(x, y);
+  if(!el || !el.closest) return null;
+  const sec = el.closest('.opt-group');
+  if(!sec || sec === sourceSec || !sec.dataset.group) return null;
+  const r = sec.getBoundingClientRect();
+  const before = y < r.top + r.height / 2;
+  return { el: sec, mark: before ? 'before' : 'after', act: { type: 'gmove', gid: sec.dataset.group, before } };
 }
 
 function renderBin(){
@@ -1712,7 +2192,7 @@ function renderBin(){
     if(!s) return;
     const row = document.createElement('div');
     row.className = 'bin-row';
-    const dayOptions = trip().days.map(d => `<option value="${d.id}">D${d.id} — ${esc(d.title)}</option>`).join('');
+    const dayOptions = trip().days.map(d => `<option value="${d.id}">D${d.id} — ${esc(shortTitle(d.title))}</option>`).join('');
     row.innerHTML = `
       <div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>
       <div class="stop-main">
@@ -1979,7 +2459,7 @@ function runSearch(){
 /* =========================================================
    ALL STOPS VIEW — master list + group-by-proximity
    ========================================================= */
-function allStopRow(id, fromDay, isOptional, optMeta){
+function allStopRow(id, fromDay, isOptional, optMeta, groupTitle){
   const s = trip().stops[id];
   if(!s) return null;
   const row = document.createElement('div');
@@ -1989,7 +2469,7 @@ function allStopRow(id, fromDay, isOptional, optMeta){
   row.innerHTML = `
     <div class="stop-illustration">${ICONS[s.cat] || '📍'}</div>
     <div class="stop-main">
-      <p class="stop-name">${esc(s.name)}${s.lat == null ? ' <span class="tag-chip" title="No coordinates">no coords</span>' : ''}</p>
+      <p class="stop-name">${esc(s.name)}${s.lat == null ? ' <span class="tag-chip" title="No coordinates">no coords</span>' : ''}${groupTitle ? ` <span class="tag-chip group-chip" title="Unassigned group">▤ ${esc(groupTitle)}</span>` : ''}</p>
       <p class="stop-desc">${esc(s.desc || '')}</p>
     </div>
     <div class="manage-row">
@@ -2003,21 +2483,14 @@ function allStopRow(id, fromDay, isOptional, optMeta){
     </div>`;
   row.dataset.id = id;
   row.dataset.dayId = isOptional ? 'optional' : String(fromDay.id);
-  row.draggable = false;
   const handle = row.querySelector('.drag-handle');
   handle.addEventListener('click', e => e.stopPropagation());
-  handle.addEventListener('mousedown', () => { row.draggable = true; });
-  handle.addEventListener('mouseup', () => { row.draggable = false; });
-  row.addEventListener('dragstart', e => {
-    row.classList.add('dragging');
-    e.dataTransfer.setData('text/plain', id);
-    e.dataTransfer.effectAllowed = 'move';
-  });
-  row.addEventListener('dragend', () => {
-    row.draggable = false;
-    row.classList.remove('dragging');
-    document.querySelectorAll('.all-row, .all-day-head').forEach(x => x.classList.remove('drop-before','drop-after','drop-target'));
-  });
+  handle.addEventListener('pointerdown', (ev) => beginCardDrag(ev, {
+    source: row,
+    hitTest: (x, y) => allStopsDragHit(row, x, y),
+    commit: (act) => allStopsMove(id, act),
+  }));
+  // HTML5 handlers stay as the drop side for tray chips dragged in.
   row.addEventListener('dragover', e => {
     e.preventDefault();
     const rect = row.getBoundingClientRect();
@@ -2057,6 +2530,33 @@ function allStopRow(id, fromDay, isOptional, optMeta){
   return row;
 }
 
+/* Where an All Stops row drag can land: another row (before/after), a day
+   heading (append to that day), or the Unassigned heading/tray. */
+function allStopsDragHit(sourceRow, x, y){
+  const el = document.elementFromPoint(x, y);
+  if(!el || !el.closest) return null;
+  const head = el.closest('.all-day-head');
+  if(head && head.dataset.drop) return { el: head, mark: 'into',
+    act: head.dataset.drop === 'optional' ? { type: 'optional' } : { type: 'day', dayId: Number(head.dataset.drop) } };
+  const tray = el.closest('.unassigned-tray');
+  if(tray) return { el: tray, mark: 'into', act: { type: 'optional' } };
+  const list = $('all-list');
+  if(!list) return null;
+  const rowTarget = (r, before) => ({ el: r, mark: before ? 'before' : 'after',
+    act: { type: 'row', id: r.dataset.id, dayId: r.dataset.dayId === 'optional' ? 'optional' : Number(r.dataset.dayId), before } });
+  const over = el.closest('.all-row');
+  if(over === sourceRow) return null;
+  if(over && list.contains(over)){
+    const r = over.getBoundingClientRect();
+    return rowTarget(over, y < r.top + r.height / 2);
+  }
+  if(el.closest('#all-list')){
+    const near = nearestRowTo(list, y, '.all-row', sourceRow);
+    if(near) return rowTarget(near.el, near.before);
+  }
+  return null;
+}
+
 /* Apply a drag-drop move in the All Stops list. */
 function allStopsMove(dragId, target){
   if(!dragId || (target.id && target.id === dragId)) return;
@@ -2065,13 +2565,18 @@ function allStopsMove(dragId, target){
   trip().optional = trip().optional.filter(o => o.id !== dragId);
   trip().bin = trip().bin.filter(x => x !== dragId);
   if(target.type === 'optional'){
-    trip().optional.push({ id: dragId, day: null, note: '' });
+    trip().optional.push({ id: dragId, day: null, note: '', group: null });
   } else if(target.type === 'day'){
     const day = trip().days.find(d => d.id === target.dayId);
     if(day) day.order.push(dragId);
   } else if(target.type === 'row'){
     if(target.dayId === 'optional'){
-      trip().optional.push({ id: dragId, day: null, note: '' });
+      // land beside the row it was dropped on, in that row's group
+      const opts = trip().optional;
+      const ti = opts.findIndex(o => o.id === target.id);
+      const entry = { id: dragId, day: null, note: '', group: ti >= 0 ? (opts[ti].group || null) : null };
+      if(ti < 0) opts.push(entry);
+      else opts.splice(target.before ? ti : ti + 1, 0, entry);
     } else {
       const day = trip().days.find(d => d.id === target.dayId);
       if(!day) return;
@@ -2107,6 +2612,7 @@ export function renderAllStops(){
     const head = document.createElement('div');
     head.className = 'all-day-head';
     if(d.color && DAY_COLORS[d.color]) head.dataset.dayColor = d.color;
+    head.dataset.drop = String(d.id);   // pointer-drag target: append to this day
     head.textContent = 'Day ' + d.id + ' — ' + d.title + ' (' + d.order.length + ')';
     wireHeadDrop(head, { type:'day', dayId: d.id });
     el.appendChild(head);
@@ -2118,13 +2624,17 @@ export function renderAllStops(){
   if(t.optional.length){
     const head = document.createElement('div');
     head.className = 'all-day-head';
+    head.dataset.drop = 'optional';
     head.textContent = 'Unassigned (' + t.optional.length + ')';
     wireHeadDrop(head, { type:'optional' });
     el.appendChild(head);
-    t.optional.forEach(o => {
-      const row = allStopRow(o.id, null, true, o);
+    // Same order the Unassigned page shows: pool first, then each group —
+    // and rows carry their group's name so the flat list still reads filed.
+    const gTitle = gid => { const g = t.optionalGroups.find(x => x.id === gid); return g ? g.title : null; };
+    optSections().forEach(sec => optItemsOf(sec.gid).forEach(o => {
+      const row = allStopRow(o.id, null, true, o, gTitle(o.group || null));
       if(row) el.appendChild(row);
-    });
+    }));
   }
   if(!el.children.length){
     el.innerHTML = '<p style="padding:20px 22px; color:var(--ink-soft); font-size:14px;">No locations yet — add some from a day panel, or import a trip in Trip Info.</p>';
@@ -3314,6 +3824,7 @@ export function wireStaticHandlers(){
   on('ap-accept', 'click', acceptAutoPlan);
   on('auto-plan-overlay', 'click', (e) => { if(e.target.id === 'auto-plan-overlay') closeAutoPlan(); });
   on('add-optional-btn', 'click', () => openLocationForm(null, 'optional'));
+  on('add-group-btn', 'click', addOptionalGroup);
   on('all-add-btn', 'click', () => openLocationForm(null, currentDay().id));
 
   // google maps route picker
@@ -3452,11 +3963,6 @@ export function wireStaticHandlers(){
     $('he-name').value = r.name;
     $('he-lat').value = r.lat;
     $('he-lng').value = r.lng;
-  });
-
-  // disarm drag armed on a handle press that never became a drag
-  document.addEventListener('mouseup', () => {
-    document.querySelectorAll('.stop-card[draggable="true"], .all-row[draggable="true"]').forEach(c => { c.draggable = false; });
   });
 
   // routed travel times landing → refresh the schedule quietly

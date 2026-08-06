@@ -110,6 +110,31 @@ check('checklist trip is still a fixed point', (() => {
   const t = parseTrip(serializeTrip(trip)).trip;
   return JSON.stringify(t) === JSON.stringify(parseTrip(serializeTrip(t)).trip);
 })());
+check('unassigned groups survive a round-trip', (() => {
+  const t = parseTrip(md).trip;
+  t.optionalGroups = [{ id:'g1', title:'Rainy day', collapsed:false }, { id:'g2', title:'Maybe', collapsed:false }];
+  t.optional[0].group = 'g1';
+  t.optional[1].group = 'g2';
+  t.optional[2].group = 'g1';
+  const back = parseTrip(serializeTrip(t)).trip;
+  const titleOf = (tr, o) => { const g = tr.optionalGroups.find(x => x.id === o.group); return g ? g.title : null; };
+  return back.optionalGroups.length === 2
+    && titleOf(back, back.optional[0]) === 'Rainy day'
+    && titleOf(back, back.optional[1]) === 'Maybe'
+    && titleOf(back, back.optional[2]) === 'Rainy day'
+    && back.optional.slice(3).every(o => o.group === null)
+    && JSON.stringify(back) === JSON.stringify(parseTrip(serializeTrip(back)).trip);
+})());
+check('an ungrouped trip writes no group lines', !serializeTrip(parseTrip(md).trip).includes('- group:'));
+check('normalize drops dangling or empty groups', (() => {
+  const raw = JSON.parse(JSON.stringify(parseTrip(md).trip));
+  raw.optionalGroups = [{ id:'g1', title:'Kept' }, { id:'g9', title:'   ' }];
+  raw.optional[0].group = 'g1';
+  raw.optional[1].group = 'g-gone';
+  const n = normalizeTrip(raw);
+  return n.optionalGroups.length === 1 && n.optionalGroups[0].title === 'Kept'
+    && n.optional[0].group === 'g1' && n.optional[1].group === null;
+})());
 check('unknown day colour is dropped', (() => {
   const bad = parseTrip(serializeTrip(trip).replace('- color: teal', '- color: neon')).trip;
   return bad.days[0].color === null;

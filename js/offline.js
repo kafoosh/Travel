@@ -418,14 +418,25 @@ function infoHtml(trip, opts){
 function optionalHtml(trip, opts){
   const items = (trip.optional || []).map(o => trip.stops[o.id] ? { stop: trip.stops[o.id], meta: o } : null).filter(Boolean);
   if(!items.length) return '';
+  const card = ({ stop, meta }) => stopCardHtml(stop, {
+    photos: opts.photos, num: null, time: '', dayLabel: 'Unassigned',
+    extra: `<div class="chips"><span class="chip">${esc(formatDur(stop.dur))}</span>` +
+      (meta.day ? `<span class="chip">suggested day ${esc(String(meta.day))}</span>` : '') + '</div>' +
+      (meta.note ? `<p class="desc quiet">${esc(meta.note)}</p>` : ''),
+  });
+  // The planner's group headers travel too: pool first, then each group, the
+  // same order the Unassigned page shows.
+  const groups = trip.optionalGroups || [];
+  const sections = groups.length ? [{ title: 'Ungrouped', gid: null }, ...groups.map(g => ({ title: g.title, gid: g.id }))]
+    : [{ title: null, gid: null }];
+  const body = sections.map(sec => {
+    const inSec = items.filter(({ meta }) => (meta.group || null) === sec.gid);
+    if(!inSec.length) return '';
+    return (sec.title ? `<p class="opt-sec">${esc(sec.title)}</p>` : '') + inSec.map(card).join('');
+  }).join('');
   return `<section class="view" id="view-opt" hidden>
     <div class="dayhead"><h2>Unassigned</h2><p class="facts">Ideas with no day of their own</p></div>
-    <div class="timeline">${items.map(({ stop, meta }) => stopCardHtml(stop, {
-      photos: opts.photos, num: null, time: '', dayLabel: 'Unassigned',
-      extra: `<div class="chips"><span class="chip">${esc(formatDur(stop.dur))}</span>` +
-        (meta.day ? `<span class="chip">suggested day ${esc(String(meta.day))}</span>` : '') + '</div>' +
-        (meta.note ? `<p class="desc quiet">${esc(meta.note)}</p>` : ''),
-    })).join('')}</div>
+    <div class="timeline">${body}</div>
   </section>`;
 }
 
@@ -547,6 +558,8 @@ svg.map .sc text{fill:var(--ink-soft); font-family:var(--mono); font-size:11px;}
 .check input:checked + span{text-decoration:line-through; color:var(--ink-soft);}
 .check-sec{margin:12px 0 2px; font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--ink-soft);}
 .check-sec:first-child{margin-top:0;}
+.opt-sec{margin:18px 0 8px; padding-bottom:4px; border-bottom:1px dashed var(--line); font-family:var(--serif); font-size:17px; font-weight:600;}
+.opt-sec:first-child{margin-top:0;}
 
 footer{margin-top:28px; padding-top:16px; border-top:1px solid var(--line); font-size:13.5px; color:var(--ink-soft);}
 footer h3{font-size:15px; margin-bottom:6px; color:var(--ink);}

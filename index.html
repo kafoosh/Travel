@@ -112,8 +112,11 @@
     <div class="daypanel viewpanel">
       <div class="daypanel-head">
         <h2>Unassigned</h2>
-        <span class="head-hint">Stops with no day yet — drag or add them where they fit</span>
-        <button class="reset-btn" id="add-optional-btn">+ Add unassigned stop</button>
+        <span class="head-hint">Stops with no day yet — file them under your own headers, drag them into shape, add them to days when they fit</span>
+        <div class="opt-head-actions">
+          <button class="reset-btn" id="add-group-btn" title="Add a header to organise the stops below — e.g. an area, a theme, a maybe-pile">▤ New group</button>
+          <button class="reset-btn" id="add-optional-btn">+ Add stop</button>
+        </div>
       </div>
       <div id="optional-list" class="bin-list"></div>
     </div>

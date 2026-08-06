@@ -79,8 +79,12 @@ export function blankTrip(){
     stops:{},                // id -> {id,name,cat,dur,lat,lng,img,desc,detail,notes,tags:[],done,hidden}
     // Stops with no day yet. Surfaced in the UI as "Unassigned"; the field
     // keeps its original name because live shared rooms and saved drafts
-    // already carry it.
-    optional:[],             // {id, day, note}
+    // already carry it. Each entry's `group` points into optionalGroups (or
+    // null for the ungrouped pool).
+    optional:[],             // {id, day, note, group}
+    // User-defined headers the Unassigned page files its stops under
+    // ("Rainy day", "Restaurants", …). Order here is display order.
+    optionalGroups:[],       // {id, title, collapsed}
     bin:[],                  // [stopId]
     // Trip to-dos — book this, pack that. Ticked items stay in the list with
     // done:true; the UI parks them in the Bin so they can be brought back.
@@ -178,6 +182,14 @@ export function serializeTrip(trip){
 
   if(trip.optional.length){
     L.push('## Unassigned', '');
+    // Group membership rides on each stop as a "- group:" line (by title, the
+    // way hotels are named): old parsers skip the unknown key, and the groups
+    // themselves are rebuilt from the names on the way back in. A group with
+    // no stops has nothing to carry it — only the JSON model keeps those.
+    const groupTitle = id => {
+      const g = (trip.optionalGroups || []).find(x => x.id === id);
+      return g ? g.title : null;
+    };
     trip.optional.forEach(o => {
       const s = trip.stops[o.id];
       if(!s) return;
@@ -185,6 +197,8 @@ export function serializeTrip(trip){
       L.push(...stopLines(s));
       if(o.day) L.push('- suggested day: ' + o.day);
       if(o.note) L.push('- suggestion note: ' + encVal(o.note));
+      const gt = o.group ? groupTitle(o.group) : null;
+      if(gt) L.push('- group: ' + encVal(gt));
       L.push('');
     });
   }
@@ -251,6 +265,7 @@ const KEY_ALIASES = {
   tags:'tags',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
+  group:'group', 'group name':'group', 'unassigned group':'group',
   transport:'mode', mode:'mode',
   start:'start', 'start time':'start',
   hotel:'hotel',
@@ -381,7 +396,9 @@ export function parseTrip(text){
         notes: cur.notes || '', tags: cur.tags || [] };
       trip.stops[id] = stop;
       if(cur.__kind === 'day') cur.__day.order.push(id);
-      else if(cur.__kind === 'optional') trip.optional.push({ id, day: curOptMeta.day || null, note: curOptMeta.note || '' });
+      // `group` holds the group's NAME until the whole document is read —
+      // ids are assigned once every name has been seen (below).
+      else if(cur.__kind === 'optional') trip.optional.push({ id, day: curOptMeta.day || null, note: curOptMeta.note || '', group: curOptMeta.group || null });
       else if(cur.__kind === 'bin') trip.bin.push(id);
     }
     cur = null; curOptMeta = null;
@@ -471,6 +488,7 @@ export function parseTrip(text){
         else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
         else if(key === 'sday' && curOptMeta){ const n = parseInt(value, 10); if(!isNaN(n)) curOptMeta.day = n; }
         else if(key === 'snote' && curOptMeta) curOptMeta.note = decVal(value);
+        else if(key === 'group'){ if(curOptMeta && value.trim()) curOptMeta.group = decVal(value.trim()); }
         else if(['img','desc','detail','notes','mode'].includes(key)) cur[key] = decVal(value);
       } else if(section && typeof section === 'object'){
         // day-level metadata; hotel names are held raw and resolved after the
@@ -521,6 +539,13 @@ export function parseTrip(text){
     d.endHotelId = resolve(('__endHotelName' in d) ? d.__endHotelName : (bookend !== 'start' ? d.__hotelName : null));
     delete d.__hotelName; delete d.__startHotelName; delete d.__endHotelName; delete d.__bookend;
   });
+
+  // Unassigned groups arrive as names on the stops; turn them into the group
+  // list (in order of first appearance) and id references.
+  const groupNames = [];
+  trip.optional.forEach(o => { if(o.group && !groupNames.includes(o.group)) groupNames.push(o.group); });
+  trip.optionalGroups = groupNames.map((title, i) => ({ id: 'g' + (i + 1), title, collapsed: false }));
+  trip.optional.forEach(o => { o.group = o.group ? 'g' + (groupNames.indexOf(o.group) + 1) : null; });
 
   trip.counter = stopSeq;
   const stopCount = Object.keys(trip.stops).length;
@@ -602,7 +627,7 @@ export function parseCsv(text){
     };
     const dayRaw = get(cells, idx.day).toLowerCase();
     if(dayRaw === 'unassigned' || dayRaw === 'optional' || dayRaw === 'pool'){
-      trip.optional.push({ id, day:null, note:'' });
+      trip.optional.push({ id, day:null, note:'', group:null });
     } else {
       const n = parseInt(dayRaw, 10) || 1;
       while(trip.days.length < n) trip.days.push(newDay(trip.days.length + 1));

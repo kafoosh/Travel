@@ -113,7 +113,20 @@ export function normalizeTrip(t){
       : !d.endHotelId ? 'start'
       : 'end';
   });
+  // Unassigned groups: user-made headers on the Unassigned page. Titles must
+  // be non-empty and ids unique; each optional entry's membership is checked
+  // against the surviving ids so a dangling reference can't orphan a stop.
+  const groupIds = new Set();
+  trip.optionalGroups = (t.optionalGroups || [])
+    .filter(g => g && typeof g.title === 'string' && g.title.trim())
+    .map((g, i) => {
+      let id = (typeof g.id === 'string' && g.id) ? g.id : 'g' + (i + 1);
+      while(groupIds.has(id)) id = 'g' + (i + 1) + '-' + groupIds.size;
+      groupIds.add(id);
+      return { id, title: g.title.trim(), collapsed: !!g.collapsed };
+    });
   trip.optional = (t.optional || []).filter(o => o && t.stops && t.stops[o.id]);
+  trip.optional.forEach(o => { o.group = (o.group && groupIds.has(o.group)) ? o.group : null; });
   trip.bin = (t.bin || []).filter(id => t.stops && t.stops[id]);
   // Checklist: drop empties, keep ids unique (they key DOM rows and undo).
   const seenIds = new Set();

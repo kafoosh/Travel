@@ -551,10 +551,8 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   transition:transform .12s, box-shadow .12s;
   cursor:pointer;
 }
-.stop-card.dragging{opacity:.35;}
-.stop-card.drop-before, .all-row.drop-before{box-shadow: inset 0 3px 0 var(--gold);}
-.stop-card.drop-after, .all-row.drop-after{box-shadow: inset 0 -3px 0 var(--gold);}
-.all-row.dragging{opacity:.35;}
+.stop-card.drop-before, .all-row.drop-before, .opt-card.drop-before{box-shadow: inset 0 3px 0 var(--gold);}
+.stop-card.drop-after, .all-row.drop-after, .opt-card.drop-after{box-shadow: inset 0 -3px 0 var(--gold);}
 .all-day-head.drop-target{background:var(--accent-tint); border-radius:6px;}
 .stop-card.travel-row{background:var(--paper);border-style:dashed;}
 
@@ -590,6 +588,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 
 .manage-row{
   display:flex; align-items:center; gap:6px;
+  flex-wrap:wrap;
   margin-top:8px;
 }
 .move-to-day{
@@ -708,7 +707,11 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   padding:12px; margin-bottom:8px; flex-wrap:wrap;
 }
 .bin-row .stop-illustration{background:linear-gradient(155deg, var(--gold), color-mix(in srgb, var(--gold) 55%, #000));}
-.bin-row .manage-row{margin-top:0;}
+/* The text column claims a real flex BASIS (not the default 0): the row now
+   wraps the controls onto their own line as the panel narrows, instead of
+   letting a wide <select> squeeze the name and description to a sliver. */
+.bin-row .stop-main{flex:1 1 230px;}
+.bin-row > .manage-row{margin-top:0; margin-left:auto; flex:0 1 auto; justify-content:flex-end;}
 .restore-to-day{
   font-family:'IBM Plex Mono', monospace;
   font-size:11px;
@@ -717,6 +720,9 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   border:1px solid var(--line);
   background:var(--card);
   color:var(--ink-soft);
+  min-width:0;
+  max-width:210px;
+  text-overflow:ellipsis;
 }
 .restore-btn{
   font-family:'IBM Plex Mono', monospace;
@@ -729,6 +735,151 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   cursor:pointer;
 }
 .restore-btn:hover{border-color:var(--ink);}
+
+/* =========================================================
+   UNASSIGNED PAGE
+   Stops filed under user-made group headers. Each card is a
+   flex pair: a wrapping inner row (icon · text · controls —
+   the controls take their own line as the panel narrows, so
+   the day <select> can never squeeze the text) and a
+   full-height drag rail on the right edge that is easy to
+   hit at any width.
+   ========================================================= */
+.opt-head-actions{display:flex; gap:8px; flex-wrap:wrap;}
+.opt-page-empty{padding:20px 22px; color:var(--ink-soft); font-size:14px; line-height:1.55; max-width:640px;}
+
+.opt-card{
+  display:flex;
+  align-items:stretch;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:10px;
+  margin-bottom:8px;
+  cursor:pointer;
+}
+.opt-inner{
+  flex:1;
+  min-width:0;
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px 12px;
+  padding:10px 6px 10px 12px;
+}
+.opt-card .stop-illustration{
+  width:46px; height:46px; font-size:19px;
+  background:linear-gradient(155deg, var(--gold), color-mix(in srgb, var(--gold) 55%, #000));
+}
+.opt-card .stop-main{flex:1 1 230px; min-width:0;}
+.opt-card .stop-name{font-size:15.5px; margin:0 0 2px;}
+.opt-card .stop-desc{
+  margin:0;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.opt-card .tag-row{margin-top:4px; align-items:center;}
+.opt-note{font-size:11.5px; color:var(--ink-soft); font-style:italic; overflow-wrap:anywhere;}
+.sug-chip{border-color:var(--gold); color:var(--gold);}
+.group-chip{border-color:var(--accent); color:var(--accent-dark);}
+.opt-card .manage-row{margin:0 0 0 auto; flex:0 1 auto; justify-content:flex-end;}
+.opt-card .restore-to-day{max-width:190px;}
+.opt-card > .drag-handle{
+  align-self:stretch;
+  height:auto;
+  min-height:44px;
+  width:38px;
+  border-left:1px dashed var(--line);
+  border-radius:0 9px 9px 0;
+}
+.opt-card.done{opacity:.62;}
+.opt-card.done .stop-name{text-decoration:line-through;}
+
+/* ---------- group sections ---------- */
+.opt-group{margin-bottom:16px; border-radius:8px;}
+.opt-group.drop-before{box-shadow: 0 -3px 0 var(--gold);}
+.opt-group.drop-after{box-shadow: 0 3px 0 var(--gold);}
+.og-head{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-family:'Fraunces', serif;
+  font-weight:600;
+  font-size:16.5px;
+  color:var(--ink);
+  padding:6px 4px 6px 2px;
+  border-bottom:1px dashed var(--line);
+  margin-bottom:10px;
+  border-radius:6px 6px 0 0;
+  cursor:pointer;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.og-head:hover{background:var(--paper);}
+.og-head.og-pool{color:var(--ink-soft);}
+.og-grip{
+  cursor:grab;
+  color:var(--ink-soft);
+  width:28px; min-height:34px;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:6px;
+  font-size:14px;
+  touch-action:none;
+  -webkit-touch-callout:none;
+}
+.og-grip:hover{background:var(--paper-card); color:var(--ink);}
+.og-grip:active{cursor:grabbing;}
+.og-caret{font-size:11px; color:var(--ink-soft); transition:transform .15s; flex:none;}
+.opt-group.collapsed .og-caret{transform:rotate(-90deg);}
+.opt-group.collapsed .og-body{display:none;}
+.opt-group.collapsed .og-head{border-bottom-style:solid; margin-bottom:2px;}
+.og-title{overflow-wrap:anywhere; min-width:0;}
+.og-count{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:10.5px;
+  background:var(--gold); color:#fff;
+  border-radius:999px;
+  padding:1px 7px;
+  flex:none;
+}
+.og-count.zero{background:var(--line); color:var(--ink-soft);}
+.og-actions{margin-left:auto; display:flex; gap:6px; flex:none;}
+.og-btn{
+  font-family:'Work Sans', sans-serif;
+  font-size:12.5px;
+  line-height:1;
+  min-width:32px; min-height:32px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--card);
+  color:var(--ink-soft);
+  cursor:pointer;
+}
+.og-btn:hover{border-color:var(--ink); color:var(--ink);}
+.og-del:hover{background:#f4d9d9; border-color:#c0645f; color:var(--danger);}
+.og-rename-input{
+  font-family:'Fraunces', serif;
+  font-weight:600;
+  font-size:16px;
+  flex:1 1 120px;
+  min-width:0;
+  padding:3px 9px;
+  border:1px solid var(--accent);
+  border-radius:6px;
+  background:var(--card);
+  color:var(--ink);
+}
+.og-empty{
+  font-size:12.5px;
+  color:var(--ink-soft);
+  border:1px dashed var(--line);
+  border-radius:9px;
+  padding:16px 14px;
+  text-align:center;
+  margin:0 0 8px;
+}
+.og-head.drop-target, .og-body.drop-target, .og-body.drop-target .og-empty{
+  background:var(--accent-tint);
+  border-radius:8px;
+}
 
 .add-location-form{ display:flex; flex-direction:column; gap:12px; margin-top:14px; }
 .add-location-form label{
@@ -1058,12 +1209,33 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   clip:rect(0,0,0,0); white-space:nowrap; border:0;
 }
 
-.stop-card.touch-dragging{
-  opacity:.5;
-  box-shadow:0 6px 18px rgba(0,0,0,.28);
-  transform:scale(1.02);
+/* =========================================================
+   POINTER DRAG (see beginCardDrag in js/ui.js)
+   The ghost is a clone of the lifted card riding under the
+   pointer; the original stays in place, dimmed, until the
+   drop lands. These sit late in the file so position:fixed
+   beats the card's own position:relative on the clone.
+   ========================================================= */
+.drag-ghost{
+  position:fixed !important;
+  left:0; top:0;
+  z-index:4000;
+  pointer-events:none;
+  opacity:.93;
+  box-shadow:0 14px 30px rgba(0,0,0,.28);
+  will-change:transform;
+  margin:0;
+  max-height:40vh;          /* a dragged group section shows its top, not a wall */
+  overflow:hidden;
+  border-radius:10px;
 }
-.drag-handle{ touch-action:none; }
+.drag-source{opacity:.4;}
+body.drag-active{cursor:grabbing;}
+body.drag-active *{cursor:grabbing !important;}
+.daytab.drop-target{background:var(--accent-tint); box-shadow:inset 0 0 0 2px var(--accent);}
+.schedule.drop-target{background:var(--accent-tint); border-radius:8px;}
+.unassigned-tray.drop-target{background:var(--accent-tint);}
+.drag-handle{ touch-action:none; -webkit-touch-callout:none; }
 
 /* =========================================================
    DESKTOP REFINEMENTS
@@ -1385,9 +1557,20 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 
   .bin-list{ padding:12px 12px 20px; }
   .bin-row{ align-items:flex-start; }
-  .bin-row .manage-row{ width:100%; }
-  .bin-row .restore-to-day{ flex:1 1 auto; min-height:40px; }
+  .bin-row .manage-row{ width:100%; margin-left:0; justify-content:flex-start; }
+  .bin-row .restore-to-day{ flex:1 1 auto; min-height:40px; max-width:none; }
   .bin-row .restore-btn{ min-height:40px; padding:8px 16px; }
+
+  /* Unassigned page on a phone: the controls take a full line of their own,
+     the drag rail widens to a thumb, group buttons reach touch size. */
+  .opt-inner{ padding:10px 2px 10px 10px; }
+  .opt-card .manage-row{ width:100%; margin-left:0; justify-content:flex-start; }
+  .opt-card .restore-to-day{ flex:1 1 120px; max-width:none; min-height:40px; font-size:12px; }
+  .opt-card .restore-btn{ min-height:40px; padding:8px 16px; }
+  .opt-card > .drag-handle{ width:44px; font-size:20px; }
+  .og-btn{ min-width:40px; min-height:40px; font-size:14px; }
+  .og-grip{ min-height:44px; width:34px; }
+  .og-head{ gap:6px; }
 
   /* Trip Info / checklist mobile rules live in the LAST-WORD block at the end
      of this file — their base rules sit later than this block. */
@@ -1471,6 +1654,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 
 .stop-controls{
   flex:none;
+  align-self:stretch;   /* the drag rail runs the card's full height — easy to hit */
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -1488,6 +1672,8 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
   user-select:none;
   -webkit-user-select:none;
 }
+.stop-card .stop-controls .drag-handle{flex:1; height:auto;}
+.all-row .drag-handle{min-width:36px;}
 .drag-handle:hover{background:var(--paper-card);color:var(--ink);}
 .drag-handle:active{cursor:grabbing;}
 .drag-handle:focus-visible{outline:2px solid var(--gold);outline-offset:1px;}
