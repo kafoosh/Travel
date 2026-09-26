@@ -3,7 +3,7 @@
    ========================================================= */
 
 import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook, setSaveGuard, backupRoomCache } from './state.js';
-import { initCloud, resumeCloud, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
+import { initCloud, resumeCloud, refreshRoom, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
 import { renderAll, renderInfo, renderAiPlan, renderCloudUI, wireStaticHandlers, applyTheme, setView, setTripLoading,
   setTripLoadingText, showUpdateBanner, flashNote, updateUndoButton } from './ui.js';
 import { restoreLaunchRoom, registerServiceWorker, isOffline, isViewOnly, onConnectivityChange, cachePhotosForRoom,
@@ -64,6 +64,7 @@ function redraw(){
    nothing to show, and nothing will come until the network does. Say so,
    rather than spinning — and don't give up to a blank trip either. */
 const OPENING_TEXT = 'Opening the shared trip…';
+const RETRYING_TEXT = 'Can’t reach the trip yet — trying again…';
 const NEEDS_NETWORK_TEXT = 'This trip needs an internet connection the first time it’s opened on this device. It will load by itself once you’re back online.';
 const stuckOffline = () => awaitingRoom && !rendered && isOffline();
 
@@ -130,15 +131,28 @@ initCloud({
   onStatus: () => {
     renderCloudUI();
     syncManifest(state.trip.name);   // a room was joined, created or left
-    // Nothing more is coming — a deleted room, a bad link, an unreachable
-    // Firestore. Show the planner and let the chip explain itself. Guarded on
-    // the gate being up at all: without a gate the boot render below owns the
-    // first paint, and an error raised synchronously here would double it.
-    if(awaitingRoom && cloud.status === 'error') renderTrip();
+    // Nothing more is coming — a deleted room, a bad link, Firestore refusing.
+    // Show the planner and let the chip explain itself. Guarded on the gate
+    // being up at all: without a gate the boot render below owns the first
+    // paint, and an error raised synchronously here would double it.
+    // A network failure that will be retried is different: the trip may
+    // still come, and a blank planner in its place would read as an empty
+    // trip (and take edits the arriving trip would overwrite). Keep waiting,
+    // and say so.
+    if(awaitingRoom && !rendered && cloud.status === 'error'){
+      if(cloud.retrying){
+        clearTimeout(patience);
+        setTripLoadingText(RETRYING_TEXT);
+      } else renderTrip();
+    }
   },
   onRemoteTrip: (t) => {
+    const next = normalizeTrip(t);
+    // A re-check that finds nothing new (the usual return to the foreground)
+    // leaves the screen alone — no redraw, no lost scroll position.
+    if(rendered && JSON.stringify(next) === JSON.stringify(state.trip)) return;
     backupRoomCache(t); // an emptied room syncing down leaves a recoverable copy
-    state.trip = normalizeTrip(t);
+    state.trip = next;
     persistLocal();     // not saveState() — that would echo the change back up
     renderTrip();
     /* An installed app's first sight of its trip — on iOS, the first launch
@@ -146,7 +160,7 @@ initCloud({
        it's now kept, so nobody has to find out on a plane. */
     if(!restored && !savedNoticeShown && launchedAsApp()){
       savedNoticeShown = true;
-      flashNote('✓ Trip saved on this device — it will open offline from now on.', 5000);
+      flashNote('✓ Trip saved on this device. Can be used offline.', 5000);
     }
   },
 });
@@ -159,12 +173,16 @@ renderCloudUI();
 if(awaitingRoom){ if(!isOffline()) patience = setTimeout(renderTrip, 4500); }
 else renderTrip();
 
-if(roomFromUrl() && cloud.status === 'connecting' && !isOffline()){
-  setTimeout(() => {
-    if(cloud.status === 'connecting'){
-      cloud.status = 'error';
-      cloud.error = 'Sync didn’t load. Check the connection and reload — your own changes are still saved on this device.';
-      renderCloudUI();
-    }
-  }, 12000);
-}
+/* ---------- back to the foreground ----------
+   An installed app is suspended, not closed, when the phone locks or
+   another app opens — and can come back hours later on a dead connection
+   with other people's edits waiting. After half a minute or more away,
+   re-check the room. (Every join has its own stall timeout and retries in
+   js/cloud.js, so a flaky connection here recovers by itself too.) */
+const REFRESH_AFTER_MS = 30 * 1000;
+let hiddenAt = 0;
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden'){ hiddenAt = Date.now(); return; }
+  if(hiddenAt && Date.now() - hiddenAt >= REFRESH_AFTER_MS) refreshRoom();
+  hiddenAt = 0;
+});
