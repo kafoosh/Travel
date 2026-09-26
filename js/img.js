@@ -67,8 +67,9 @@ export function imageCandidates(raw){
 }
 
 /* Walk the candidates until one loads. Resolves to the working URL, or
-   false once they're all spent. */
-function resolveImage(url){
+   false once they're all spent. Exported for js/app.js, which hands the
+   working URLs to the service worker to keep for offline. */
+export function resolveImage(url){
   if(resolved.has(url)) return Promise.resolve(resolved.get(url));
   if(resolving.has(url)) return resolving.get(url);
 

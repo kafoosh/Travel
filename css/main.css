@@ -239,6 +239,7 @@ html.trip-loading #trip-loading{
 html.trip-loading .wrap > section,
 html.trip-loading .wrap > footer{ display:none; }
 html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
+#trip-loading-text{ max-width:34em; line-height:1.6; }
 #trip-loading .spin{
   display:inline-block;
   font-size:15px;
@@ -300,6 +301,52 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
 .toplinks button:disabled{opacity:.35; cursor:default;}
 #cloud-chip{border-color:var(--accent); color:var(--accent-dark);}
 #cloud-chip.bad{border-color:var(--danger); color:var(--danger);}
+
+/* ---------- Installed app: offline, view-only, update notices ----------
+   html.view-only = a shared trip with no connection (js/pwa.js). Edit
+   controls stay where they are — so the page keeps its shape and done /
+   hidden states still read — but are dimmed and can't be pressed. Anything
+   reached another way is caught by the save guard in js/app.js. */
+html.view-only :is(#add-location-btn, #edit-day-btn, #optimize-order, #add-hotel-btn,
+  .done-btn, .hide-btn, .bin-btn, .move-to-day, .mode-opt,
+  #modal-done, #modal-hide, #modal-edit, #modal-bin,
+  .check-add, .check-tick, .check-del, .ic-edit, .og-add, .og-rename, .og-del,
+  #cloud-create, #cloud-duplicate, #cloud-empty, #cloud-delete, #allow-rearrange){
+  opacity:.45; pointer-events:none;
+}
+html.view-only .modal-notes{ border-style:solid; background:transparent; }
+
+.app-banner{
+  position:fixed; z-index:120;
+  left:50%; transform:translateX(-50%);
+  bottom:calc(16px + env(safe-area-inset-bottom));
+  width:min(560px, calc(100% - 32px));
+  display:flex; align-items:center; gap:10px;
+  padding:10px 10px 10px 16px;
+  background:var(--paper-card); color:var(--ink);
+  border:1px solid var(--accent); border-radius:10px;
+  box-shadow:0 6px 24px rgba(0,0,0,.18);
+  font-size:14px;
+}
+.app-banner > span{ flex:1; min-width:0; }
+.app-banner .reset-btn{ border-color:var(--accent); color:var(--accent-dark); font-weight:500; }
+.app-banner-x{
+  background:none; border:none; color:var(--ink-soft);
+  font-size:15px; width:36px; height:36px; cursor:pointer; border-radius:8px;
+}
+.app-toast{
+  position:fixed; z-index:121;
+  left:50%; transform:translate(-50%, 12px);
+  bottom:calc(16px + env(safe-area-inset-bottom));
+  max-width:calc(100% - 32px);
+  padding:9px 14px; border-radius:8px;
+  background:var(--ink); color:var(--paper-card);
+  font-size:13.5px; line-height:1.4; text-align:center;
+  opacity:0; pointer-events:none;
+  transition:opacity .2s, transform .2s;
+}
+.app-toast.show{ opacity:1; transform:translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce){ .app-toast{ transition:none; } }
 
 /* ---------- Share & sync ---------- */
 .cloud-state{
@@ -1353,6 +1400,11 @@ body.drag-active *{cursor:grabbing !important;}
   #cloud-chip[data-state="connecting"]::before{ content:'◌'; }
   #cloud-chip[data-state="note"]::before{ content:'↻'; }
   #cloud-chip[data-state="error"]::before{ content:'⚠'; }
+  /* Offline keeps a word: a lone glyph wouldn't say why editing stopped. */
+  #cloud-chip[data-state="offline"]{ font-size:0; }
+  #cloud-chip[data-state="offline"]::before{ content:'⊘ Offline'; font-size:12px; white-space:nowrap; }
+  /* Notices sit above the fixed bottom tab bar. */
+  .app-banner, .app-toast{ bottom:calc(72px + env(safe-area-inset-bottom)); }
 
   /* --- Bottom view bar: fixed, five thumb-size slots, icon over label --- */
   .tl-views{

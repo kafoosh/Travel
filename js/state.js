@@ -193,7 +193,14 @@ export function forgetRoomCache(code){
 let cloudPushHook = null;
 export function setCloudPushHook(fn){ cloudPushHook = fn; }
 
+/* Every edit ends in saveState(), so this is where a view-only trip (shared,
+   and offline — see js/pwa.js) refuses one: a guard returning true means the
+   change was not kept, and the guard has put the trip back. */
+let saveGuard = null;
+export function setSaveGuard(fn){ saveGuard = fn; }
+
 export function saveState(){
+  if(saveGuard && saveGuard()) return;
   persistLocal();
   if(cloudPushHook) cloudPushHook();
 }

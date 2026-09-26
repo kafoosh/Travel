@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Travel Planner</title>
+<!-- Installable app: manifest + icons. The service worker (sw.js, registered
+     by js/pwa.js) makes the installed app open and show trips offline. -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#C1502E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Travel">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Opening a share link runs three round-trips in sequence before the trip
@@ -75,7 +85,7 @@
        rather than as loading. -->
   <div id="trip-loading" role="status" aria-live="polite">
     <span class="spin" aria-hidden="true">◌</span>
-    <span>Opening the shared trip…</span>
+    <span id="trip-loading-text">Opening the shared trip…</span>
   </div>
 
   <section id="view-days">

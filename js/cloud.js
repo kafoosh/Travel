@@ -19,12 +19,14 @@
 
 import { FIREBASE_CONFIG } from './config.js';
 import { isValidTrip } from './format.js';
+import { rememberRoom, forgetLaunchRoom, isOffline } from './pwa.js';
 
 const SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 const CLIENT_ID = Math.random().toString(36).slice(2, 10);
 
 let api = null;              // firestore adapter once loaded
 let unsub = null;
+let joining = false;          // a joinRoom() is between detach() and subscribe()
 let pushTimer = null;
 /* Write-safety latch: set once this client created the current room, or has
    applied its contents from a snapshot. Every cloud write is gated on it. */
@@ -118,7 +120,20 @@ export function initCloud(handlers){
       : null);
     return;
   }
-  if(code) joinRoom(code);
+  if(!code) return;
+  // No connection: the room's cached copy (if any) is what's shown, and
+  // resumeCloud() joins once the connection returns.
+  if(isOffline()){ cloud.room = code; setStatus('connecting'); return; }
+  joinRoom(code);
+}
+
+/* Back online: join the room from the URL if nothing is listening to it —
+   the app was opened offline, or the first join failed for lack of network.
+   A live listener reconnects by itself and is left alone. */
+export function resumeCloud(){
+  const code = roomFromUrl();
+  if(!FIREBASE_CONFIG || !code || unsub || joining) return;
+  joinRoom(code);
 }
 
 export async function joinRoom(code, opts = {}){
@@ -127,7 +142,9 @@ export async function joinRoom(code, opts = {}){
   cloud.room = code;
   cloud.arriving = !expectNew;
   hydrated = expectNew;
+  rememberRoom(code);        // reopened by the installed app at launch
   setStatus('connecting');
+  joining = true;
   try{
     await loadFirebase();
     await api.signIn();
@@ -163,6 +180,8 @@ export async function joinRoom(code, opts = {}){
        loaded yet. */
   } catch(e){
     setStatus('error', errorMessage(e));
+  } finally {
+    joining = false;
   }
 }
 
@@ -217,6 +236,7 @@ export async function deleteRoom(){
     return { error: errorMessage(e, 'delete') };
   }
   cloud.room = null; cloud.note = null;
+  forgetLaunchRoom(code, { deleted: true });
   history.replaceState(null, '', location.origin + location.pathname);
   setStatus('local');
   return { code };
@@ -224,6 +244,7 @@ export async function deleteRoom(){
 
 export function leaveRoom(){
   detach();
+  if(cloud.room) forgetLaunchRoom(cloud.room);
   cloud.room = null; cloud.note = null;
   history.replaceState(null, '', location.origin + location.pathname);
   setStatus('local');
@@ -250,6 +271,9 @@ async function pushNow(){
 }
 
 export function cloudStatusText(){
+  if(isOffline()) return cloud.room
+    ? 'Offline — this is the copy of the trip saved on this device, and it’s view-only until the connection returns. Syncing picks up again by itself.'
+    : 'Offline — this unshared trip still saves in this tab. Share it once you’re back online.';
   if(cloud.status === 'error') return 'Sync problem: ' + cloud.error;
   if(cloud.status === 'connecting') return 'Connecting…';
   if(cloud.status === 'synced'){
