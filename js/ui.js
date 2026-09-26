@@ -149,8 +149,13 @@ function nearestRowTo(container, y, selector, exclude){
      hitTest(x, y) -> { el, mark: 'before'|'after'|'into', act } | null,
      commit(act): apply the drop — called only after a real lift, on a target
    } */
+/* The trip's "lock the order" switch (Info page). It rides on the trip, so a
+   shared room locks for everyone. Every drag / keyboard reorder checks it. */
+const stopsLocked = () => !!trip().stopsLocked;
+const LOCKED_TITLE = 'Rearranging is locked — turn it back on at the top of the Info page';
+
 function beginCardDrag(ev, cfg){
-  if(liveDrag) return;
+  if(liveDrag || stopsLocked()) return;
   if(ev.pointerType === 'mouse' && ev.button !== 0) return;
   ev.preventDefault();
   const source = cfg.source;
@@ -321,7 +326,7 @@ function renderTabs(){
     btn.className = 'daytab' + (i === state.currentDayIndex ? ' active' : '');
     if(d.color && DAY_COLORS[d.color]) btn.dataset.dayColor = d.color;
     btn.dataset.dayIdx = i;   // pointer-dragged stop cards drop here to change day
-    btn.draggable = true;
+    btn.draggable = !stopsLocked();
     btn.tabIndex = 0;
     btn.title = 'Drag to reorder the trip (or focus and press Shift + ← / →)';
     /* Two lines: the day number and date on top, the title beneath. A long
@@ -333,7 +338,7 @@ function renderTabs(){
       (date ? '<span class="d-date">' + formatDayDate(date) + '</span>' : '') + '</span>' +
       '<span class="d-title">' + esc(d.title) + '</span>';
     btn.title = d.title + (date ? ' · ' + formatDayDate(date) : '') +
-      ' — drag to reorder the trip (or focus and press Shift + ← / →)';
+      (stopsLocked() ? '' : ' — drag to reorder the trip (or focus and press Shift + ← / →)');
     btn.addEventListener('click', () => { state.currentDayIndex = i; renderAll(); });
 
     btn.addEventListener('dragstart', e => {
@@ -362,7 +367,7 @@ function renderTabs(){
     });
 
     btn.addEventListener('keydown', e => {
-      if(!e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      if(!e.shiftKey || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || stopsLocked()) return;
       e.preventDefault();
       e.stopPropagation();
       const landed = moveDay(i, e.key === 'ArrowLeft' ? i - 1 : i + 2);
@@ -528,7 +533,7 @@ function renderDayPanel(){
         <button class="reset-btn" id="edit-day-btn">✎ Edit day</button>
         <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">Google Maps</button>
         <button class="reset-btn" id="add-location-btn">+ Add location</button>
-        <button class="reset-btn" id="optimize-order" title="Reorder this day's stops to minimise travel time">✨ Optimize route</button>
+        <button class="reset-btn" id="optimize-order" ${stopsLocked() ? `disabled title="${LOCKED_TITLE}"` : `title="Reorder this day's stops to minimise travel time"`}>✨ Optimize route</button>
       </div>
     </div>
     ${hotelBarHtml}
@@ -555,6 +560,7 @@ function renderDayPanel(){
   $('gmaps-day-btn').addEventListener('click', () => openGmapsPicker(day));
   $('add-location-btn').addEventListener('click', () => openLocationForm(null, day.id));
   $('optimize-order').addEventListener('click', () => {
+    if(stopsLocked()) return;
     pushUndo();
     day.order = optimizeDayOrder(trip(), day);
     saveState();
@@ -990,7 +996,7 @@ function renderScheduleList(day, sched){
 
     // --- Keyboard reorder ---
     handle.addEventListener('keydown', (e) => {
-      if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      if((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || stopsLocked()) return;
       e.preventDefault();
       e.stopPropagation();
       moveStop(day, s.id, e.key === 'ArrowUp' ? -1 : 1);
@@ -1100,7 +1106,7 @@ function renderUnassignedTray(host, dayId){
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'ut-chip';
-    chip.draggable = true;
+    chip.draggable = !stopsLocked();
     chip.dataset.id = o.id;
     chip.innerHTML = (ICONS[s.cat] || '📍') + ' ' + esc(s.name) +
       (o.day ? ' <span class="ut-sug">D' + o.day + '?</span>' : '');
@@ -1922,7 +1928,7 @@ function optGroupSection({ gid, group }, hasGroups){
         commit: (act) => moveGroup(group.id, act.gid, act.before),
       }));
       grip.addEventListener('keydown', (e) => {
-        if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        if((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || stopsLocked()) return;
         e.preventDefault();
         nudgeGroup(group.id, e.key === 'ArrowUp' ? -1 : 1);
       });
@@ -2023,7 +2029,7 @@ function optCard(o){
     commit: (act) => optDropMove(o.id, act),
   }));
   handle.addEventListener('keydown', (e) => {
-    if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    if((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || stopsLocked()) return;
     e.preventDefault();
     e.stopPropagation();
     optKeyMove(o.id, e.key === 'ArrowUp' ? -1 : 1);
@@ -3118,6 +3124,16 @@ export function renderInfo(){
   const doneCount = t.checklist.filter(c => c.done).length;
 
   el.innerHTML = `
+    <div class="infocard span-all lock-card">
+      <label class="lock-toggle">
+        <input type="checkbox" role="switch" id="allow-rearrange"${t.stopsLocked ? '' : ' checked'}>
+        <span class="lock-text"><b>Allow rearranging stops</b>
+          <span class="lock-sub">${t.stopsLocked
+            ? 'Off — the itinerary is locked in. Stops and days can’t be dragged, nudged or re-optimized, so timings stay put. Applies to everyone on this trip’s link.'
+            : 'On — stops and days can be dragged into a new order. Turn off once the plan is locked in, so nobody moves a card by accident. Applies to everyone on this trip’s link.'}</span>
+        </span>
+      </label>
+    </div>
     <div class="infocard span-all">
       <h3><span class="ic-icon" aria-hidden="true">✅</span> Checklist
         ${openCount ? `<span class="ic-count">${openCount} open</span>` : ''}</h3>
@@ -3171,6 +3187,15 @@ export function renderInfo(){
       <p class="cloud-warn"><b>Worth knowing:</b> anyone holding the link can edit the trip, and a link that gets out can't be revoked — duplicate to a new room (and delete the old one) to cut it off. Simultaneous edits resolve last-change-wins. "Stop syncing" only detaches this browser and leaves the shared copy alone; "Empty this room" clears the itinerary for everyone on the link but keeps the link working; "Delete this room" removes the shared copy for good.</p>
     </div>
   `;
+
+  $('allow-rearrange').addEventListener('change', (e) => {
+    pushUndo();
+    t.stopsLocked = !e.target.checked;
+    saveState();
+    renderAll();
+    renderInfo();
+    updateUndoButton();
+  });
 
   // hotels list
   const list = $('hotel-mini-list');
@@ -3565,6 +3590,7 @@ function doImport(text){
   const n = Object.keys(result.trip.stops).length;
   if(!confirm('Import "' + result.trip.name + '" (' + result.trip.days.length + ' days, ' + n + ' locations)? This replaces the current trip — Undo can bring the old one back.')) return;
   pushUndo();
+  result.trip.stopsLocked = stopsLocked();   // a room setting, not part of the plan
   replaceTrip(result.trip);
   applyTheme();
   renderAll();
@@ -3820,6 +3846,7 @@ function renderFooter(){
    ========================================================= */
 export function renderAll(){
   applyTheme();
+  document.documentElement.classList.toggle('stops-locked', stopsLocked());
   renderHero();
   renderTabs();
   renderDayPanel();
