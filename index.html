@@ -5,8 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Travel Planner</title>
 <!-- Installable app: manifest + icons. The service worker (sw.js, registered
-     by js/pwa.js) makes the installed app open and show trips offline. -->
-<link rel="manifest" href="manifest.json">
+     by js/pwa.js) makes the installed app open and show trips offline.
+     The manifest link is added by script, not written here: on iOS, a
+     home-screen app gets storage of its own (nothing Safari saved comes
+     with it) and opens at the manifest's start_url — so an app added from a
+     shared trip has to carry that trip's #trip= in its start URL, or it
+     opens blank. There, js/pwa.js links a per-trip manifest instead; this
+     only has to keep Safari from seeing the generic one first. -->
+<script>
+  (function(){
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if(ios && /[#&]trip=[a-z0-9]{12,40}/.test(location.hash)) return;
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = 'manifest.json';
+    document.head.appendChild(link);
+  })();
+</script>
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="theme-color" content="#C1502E">
