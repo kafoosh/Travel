@@ -655,6 +655,10 @@ const ICON_BIN = svgIcon(
 const ICON_PENCIL = svgIcon(
   '<path d="M13.4 3.6a1.7 1.7 0 0 1 2.4 2.4L7.3 14.5 4 15.5l1-3.3Z"/>' +
   '<path d="M12.2 4.8 14.6 7.2"/>');
+/* A map pin, for the detail modal's "open in Google Maps" link. */
+const ICON_PIN = svgIcon(
+  '<path d="M10 17.6s5.4-5.1 5.4-9.3a5.4 5.4 0 0 0-10.8 0c0 4.2 5.4 9.3 5.4 9.3Z"/>' +
+  '<circle cx="10" cy="8.3" r="1.9"/>');
 
 /* =========================================================
    DONE TICKS
@@ -1450,11 +1454,23 @@ function openModal(stopId, row){
   bin.innerHTML = ICON_BIN + '<span>Bin</span>';
   bin.title = 'Move to bin';
   bin.setAttribute('aria-label', 'Move to bin');
+  const gmaps = $('modal-gmaps');
+  gmaps.href = stopGmapsUrl(stop);
+  gmaps.innerHTML = ICON_PIN + '<span>Open in Google Maps</span>';
+  gmaps.title = stop.lat != null ? 'Open this location in Google Maps' : 'Search Google Maps for ' + stop.name;
 
   $('modal-overlay').classList.add('open');
   lastFocusedEl = document.activeElement;
   $('modal-close').focus();
   document.body.style.overflow = 'hidden';
+}
+/* Pin the exact coordinates when the stop has them; otherwise fall back to a
+   search by name so a stop that was never geocoded still gets somewhere. */
+function stopGmapsUrl(stop){
+  const query = stop.lat != null
+    ? stop.lat.toFixed(6) + ',' + stop.lng.toFixed(6)
+    : stop.name;
+  return 'https://www.google.com/maps/search/?' + new URLSearchParams({ api: '1', query }).toString();
 }
 function paintModalDone(stop){
   const btn = $('modal-done');

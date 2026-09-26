@@ -2174,6 +2174,12 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
 /* The stop detail modal's actions sit above the description instead of after
    it, so they carry a bottom margin rather than a top one. */
 #modal-overlay .modal-actions{margin:0 0 16px;}
+/* Open-in-Google-Maps sits at the foot of the detail modal, full width. */
+.modal-gmaps{
+  display:flex; justify-content:center;
+  margin-top:16px; padding:10px 12px;
+  text-decoration:none;
+}
 
 /* ---------- Google Maps route picker ---------- */
 /* The box is a flex column so a long day scrolls INSIDE the list: the
