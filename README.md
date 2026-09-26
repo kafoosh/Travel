@@ -12,6 +12,7 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 - **Import survives real-world LLM output** — the prompt asks for a fenced code block (so `#`/`-` markers survive copy-paste), and the parser unwraps fences and *reconstructs* stripped markers when a chat UI rendered the markdown before you copied it.
 - **Per-leg transport** — click any travel connector to pin that leg to walk / cycle / transit / taxi / boat; the leg re-routes against the matching profile and the schedule recalculates. Routed transit legs report the real vehicle (bus, metro, tram, ferry).
 - **Take it offline** — **Offline copy (.html)** on the AI Plan tab writes the whole trip into one self-contained HTML file: every day, time, travel leg, note and coordinate, the photos (fetched and packed in, shrunk to phone size), and a tile-free route sketch per day drawn from the routed geometry. It makes no network requests at all, so it opens from a phone's Files app on a plane or with roaming off — searchable, day by day, with coordinates that hand off to an offline map app (Organic Maps, OsmAnd…) via `geo:` links. Stops already ticked off in the planner arrive ticked, and more can be ticked as you go (those stay on that device), the trip's own `.md` file rides along inside it for importing back, and printing it gives a PDF of the whole trip.
+- **Install it as an app** — "Add to Home Screen" (Safari) or the install prompt (Chrome/Edge) gives the planner a full-screen icon of its own, and it works offline: the app shell is kept by a service worker, and every shared trip this device has opened renders from its saved copy with no connection — days, times, notes, and the photos of the last 5 trips opened. The installed app reopens the last trip at launch. Offline, a shared trip is **view-only** (an "Offline · view only" chip in the top bar; edit controls dim) so two devices can't drift apart; an unshared draft stays editable. A trip never opened on this device says it needs a connection the first time. Map tiles and live routing still need the network. New versions download in the background: a "Reload" banner offers them, and they apply on the next launch regardless. This complements the single-file offline copy above — it doesn't replace it.
 - **External maps** — per-day "Open in Google Maps" directions links: the button first shows the day's points by name (hotel bookends, stops, hike ends) so you can tick just the legs you want to navigate, with select all / none, the itinerary's own numbering (stop 4 stays "4" whatever is ticked, so "just 4 and 5" is picked by the numbers on the day), and an honest warning when a selection passes Google's 11-point cap. Plus a whole-trip KML export for [Google My Maps](https://mymaps.google.com) (one toggleable layer per day, with pins and routes).
 - **Real travel times** — walking and driving legs are routed by the [FOSSGIS Valhalla server](https://valhalla.openstreetmap.de), public transport (including ferries like Venice's vaporetti) by [Transitous](https://transitous.org). Both are free, keyless, community-run, OSM-based. Distance-based estimates render instantly (marked "est") and upgrade in place when routed answers land; results are cached in the browser, so a settled trip makes no further requests.
 - **Route optimisation** — per-day (nearest-neighbour + 2-opt over best-known travel minutes) and whole-trip **Auto-plan**: cheapest-insertion assignment with hard per-day time budgets (visit durations + travel + hotel legs), load-adaptive seeding so dense areas get more days, hotel-region coherence (a day sleeping in Rome never becomes a Venice day), stops already ticked off pinned to their day, and balance sweeps. Auto-plan shows a per-day preview — mini-map, schedule, distance, and runs-late warnings — to accept or reject before anything changes. Optimisation is a suggestion — drag-and-drop is always the escape hatch, and everything is one Undo away.
@@ -38,6 +39,8 @@ python3 -m http.server 8000     # then open http://localhost:8000
 ```
 
 **GitHub Pages:** Settings → Pages → deploy from branch → `main`, root. Done.
+
+**After changing any app file** (HTML, CSS, JS, icons, manifest) run `node scripts/build-sw.mjs` and commit the re-stamped `sw.js`. Installed copies of the app only look for an update when `sw.js` itself changes; the script hashes the shell files into it. CI (`.github/workflows/sw-stamp.yml`) fails when the stamp is stale.
 
 Opening `index.html` via `file://` mostly works, but browsers block `fetch` on that scheme, so the example-trip button and live routing need a real server.
 
@@ -196,6 +199,10 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | `js/optimize.js` | 2-opt day ordering + capacity-aware multi-day distribution |
 | `js/ui.js` | All rendering and interaction |
 | `js/offline.js` | The self-contained offline export (one HTML file, no requests) |
+| `js/pwa.js` | Installed app: service worker registration + updates, last-trip restore at launch, offline/view-only state, photo caching requests |
+| `sw.js` | Service worker: precached app shell (cache-first, versioned), font + trip-photo caches |
+| `manifest.json`, `icons/` | Web app manifest and home-screen icons |
+| `scripts/build-sw.mjs` | Stamps `sw.js` with the shell file list and a content hash (`--check` for CI) |
 | `js/state.js` | Persistence, undo, normalisation |
 | `js/cloud.js` | Share-on-demand Firestore rooms (create / duplicate / delete) |
 | `js/admin.js` | The rooms dashboard behind `admin.html` |

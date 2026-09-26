@@ -1,0 +1,21 @@
+# Installed copies of the app only update when sw.js changes, and sw.js only
+# changes when scripts/build-sw.mjs re-stamps it. This fails the check when a
+# shell file (HTML, CSS, JS, icons…) changed without the re-stamp — run
+# `node scripts/build-sw.mjs` and commit sw.js to fix it.
+name: Service worker stamp
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/build-sw.mjs --check
+      - run: node scripts/roundtrip-test.mjs

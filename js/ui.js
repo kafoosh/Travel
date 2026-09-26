@@ -19,6 +19,7 @@ import { attachAutocomplete } from './geocode.js';
 import { dayMapPoints, googleMapsUrl, tripKml } from './exporters.js';
 import { buildOfflineHtml, collectPhotos, photoUrls, offlineFileName } from './offline.js';
 import { mountImage } from './img.js';
+import { isOffline, isViewOnly } from './pwa.js';
 
 const CAT_LABEL = {
   landmark:'Landmark', museum:'Museum', church:'Church / temple', park:'Park / nature',
@@ -151,7 +152,7 @@ function nearestRowTo(container, y, selector, exclude){
    } */
 /* The trip's "lock the order" switch (Info page). It rides on the trip, so a
    shared room locks for everyone. Every drag / keyboard reorder checks it. */
-const stopsLocked = () => !!trip().stopsLocked;
+const stopsLocked = () => !!trip().stopsLocked || isViewOnly();   // offline shared trips are view-only
 const LOCKED_TITLE = 'Rearranging is locked — turn it back on at the top of the Info page';
 
 function beginCardDrag(ev, cfg){
@@ -1227,7 +1228,7 @@ function moveToOptional(day, id){
 
 export function updateUndoButton(){
   const btn = $('undo-btn');
-  if(btn) btn.disabled = state.undoStack.length === 0;
+  if(btn) btn.disabled = state.undoStack.length === 0 || isViewOnly();
 }
 
 /* =========================================================
@@ -1448,6 +1449,7 @@ function openModal(stopId, row){
   const full = stop.detail ? (stop.desc + '\n\n' + stop.detail) : stop.desc;
   $('modal-text').textContent = full;
   $('modal-notes').value = stop.notes || '';
+  $('modal-notes').readOnly = isViewOnly();
   paintModalDone(stop);
   paintModalHide(stop);
   // One word and an icon each: four actions fit on one line, phone included,
@@ -3618,7 +3620,9 @@ export function renderCloudUI(){
   const ss = $('save-share-btn');
   if(ss){
     if(cloud.room){
-      ss.textContent = cloud.status !== 'connecting' ? '🔗 Share'
+      // Offline, "connecting" only means "waiting for the network" — the
+      // link can still be copied, so offer that rather than a spinner.
+      ss.textContent = cloud.status !== 'connecting' || isOffline() ? '🔗 Share'
         : cloud.arriving ? '◌ Opening…' : '◌ Saving…';
       ss.title = 'Copy the shareable link to this trip';
     } else {
@@ -3629,7 +3633,18 @@ export function renderCloudUI(){
     }
   }
   const chip = $('cloud-chip');
-  if(chip){
+  if(chip && isOffline()){
+    // Offline outranks every sync state: it's what explains the rest.
+    const viewOnly = isViewOnly();
+    chip.classList.remove('hidden');
+    chip.classList.add('bad');
+    chip.textContent = viewOnly ? '⊘ Offline · view only' : '⊘ Offline';
+    chip.title = viewOnly
+      ? 'No connection — this shared trip is view-only until you’re back online'
+      : 'No connection — this unshared trip still saves in this tab';
+    chip.dataset.state = 'offline';
+  } else if(chip){
+    chip.title = 'Sync status — opens Trip Info';
     const on = cloud.status !== 'local';
     chip.classList.toggle('hidden', !on);
     chip.classList.toggle('bad', cloud.status === 'error');
@@ -3652,6 +3667,56 @@ export function renderCloudUI(){
   $('cloud-leave').classList.toggle('hidden', !inRoom);
   $('cloud-danger-row').classList.toggle('hidden', !inRoom);
   if(inRoom) $('cloud-link').value = shareUrl(cloud.room);
+}
+
+/* =========================================================
+   APP NOTICES — the "new version" banner and short toasts
+   (js/pwa.js decides when; these only draw them)
+   ========================================================= */
+
+/* One quiet bar above the bottom tab bar. `apply` switches to the new
+   version and reloads; dismissing leaves it for the next launch. */
+export function showUpdateBanner(apply){
+  if($('update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'update-banner';
+  bar.className = 'app-banner';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span>A new version of the planner is ready.</span>' +
+    '<button type="button" class="reset-btn" id="update-apply">Reload</button>' +
+    '<button type="button" class="app-banner-x" id="update-dismiss" aria-label="Later — update on next launch" title="Later — it updates on the next launch">✕</button>';
+  document.body.appendChild(bar);
+  $('update-apply').addEventListener('click', () => {
+    $('update-apply').disabled = true;
+    $('update-apply').textContent = 'Reloading…';
+    apply();
+  });
+  $('update-dismiss').addEventListener('click', () => bar.remove());
+}
+
+let toastTimer = null;
+export function flashNote(text, ms = 3200){
+  let el = $('app-toast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'app-toast';
+    el.className = 'app-toast';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+/* The loading gate's line: "opening…" normally, or why nothing can open. */
+export function setTripLoadingText(text, { spinning = true } = {}){
+  const el = $('trip-loading-text');
+  if(el) el.textContent = text;
+  const spin = document.querySelector('#trip-loading .spin');
+  if(spin) spin.style.display = spinning ? '' : 'none';
 }
 
 /* =========================================================
@@ -3847,6 +3912,7 @@ function renderFooter(){
 export function renderAll(){
   applyTheme();
   document.documentElement.classList.toggle('stops-locked', stopsLocked());
+  document.documentElement.classList.toggle('view-only', isViewOnly());
   renderHero();
   renderTabs();
   renderDayPanel();
