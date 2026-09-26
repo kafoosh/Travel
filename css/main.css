@@ -1802,6 +1802,15 @@ body.drag-active *{cursor:grabbing !important;}
   border-radius:10px;
   padding:16px 18px 18px;
 }
+/* Info page: the room-wide "allow rearranging stops" switch. With it off,
+   html.stops-locked hides every reorder grip, so nothing can be picked up. */
+.lock-toggle{display:flex; align-items:flex-start; gap:12px; cursor:pointer;}
+.lock-toggle input{flex:none; width:18px; height:18px; margin:2px 0 0; accent-color:var(--accent); cursor:pointer;}
+.lock-text{display:flex; flex-direction:column; gap:3px; font-size:14px;}
+.lock-sub{font-size:13px; color:var(--ink-soft); line-height:1.45;}
+.stops-locked .drag-handle,
+.stops-locked .og-grip{display:none;}
+.stops-locked .daytab{cursor:pointer;}
 .infocard h3{
   font-family:'Fraunces', serif;
   font-size:16px;

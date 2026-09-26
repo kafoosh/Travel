@@ -96,6 +96,9 @@ export function normalizeTrip(t){
     };
   });
   if(!trip.days.length) trip.days = base.days;
+  // Room-wide "itinerary locked in": drag and keyboard reordering of stops
+  // (and days) is switched off for everyone on the link. Toggled on Info.
+  trip.stopsLocked = !!t.stopsLocked;
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
   trip.days.forEach(d => {
     if(d.startHotelId && !trip.hotels.some(h => h.id === d.startHotelId)) d.startHotelId = null;
