@@ -6,7 +6,8 @@ import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook, setSav
 import { initCloud, resumeCloud, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
 import { renderAll, renderInfo, renderAiPlan, renderCloudUI, wireStaticHandlers, applyTheme, setView, setTripLoading,
   setTripLoadingText, showUpdateBanner, flashNote, updateUndoButton } from './ui.js';
-import { restoreLaunchRoom, registerServiceWorker, isOffline, isViewOnly, onConnectivityChange, cachePhotosForRoom } from './pwa.js';
+import { restoreLaunchRoom, registerServiceWorker, isOffline, isViewOnly, onConnectivityChange, cachePhotosForRoom,
+  syncManifest, launchedAsApp } from './pwa.js';
 import { photoUrls } from './offline.js';
 import { resolveImage } from './img.js';
 import { debounce } from './util.js';
@@ -37,6 +38,7 @@ setCloudPushHook(scheduleCloudPush);
    loading. So hold the first render, and show the loading line instead. */
 const awaitingRoom = !!roomFromUrl() && !restored && cloud.configured;
 let patience = null;
+let savedNoticeShown = false;
 let rendered = false;
 
 /* Draw the trip. The first call also takes the loading gate down; later ones
@@ -55,6 +57,7 @@ function renderTrip(){
 function redraw(){
   renderAll();
   renderOpenTab();
+  syncManifest(state.trip.name);   // "Add to Home Screen" on iOS keeps this trip
 }
 
 /* A share link this device has never opened, with no connection: there is
@@ -126,6 +129,7 @@ initCloud({
   getTrip: () => state.trip,
   onStatus: () => {
     renderCloudUI();
+    syncManifest(state.trip.name);   // a room was joined, created or left
     // Nothing more is coming — a deleted room, a bad link, an unreachable
     // Firestore. Show the planner and let the chip explain itself. Guarded on
     // the gate being up at all: without a gate the boot render below owns the
@@ -137,6 +141,13 @@ initCloud({
     state.trip = normalizeTrip(t);
     persistLocal();     // not saveState() — that would echo the change back up
     renderTrip();
+    /* An installed app's first sight of its trip — on iOS, the first launch
+       after "Add to Home Screen", which starts with empty storage. Say that
+       it's now kept, so nobody has to find out on a plane. */
+    if(!restored && !savedNoticeShown && launchedAsApp()){
+      savedNoticeShown = true;
+      flashNote('✓ Trip saved on this device — it will open offline from now on.', 5000);
+    }
   },
 });
 renderCloudUI();

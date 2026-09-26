@@ -34,17 +34,19 @@ const roomInHash = () => {
 
 /* ---------- launch ---------- */
 
-export function launchedAsApp(){
+/* Decided once, at load: restoreLaunchRoom() tidies ?source=pwa off the URL. */
+const LAUNCHED_AS_APP = typeof location !== 'undefined' && (() => {
   if(/(?:^|[?&])source=pwa(?:&|$)/.test(location.search)) return true;
   try{
     if(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
   } catch(e){}
   return navigator.standalone === true;   // iOS Safari home-screen app
-}
+})();
+export const launchedAsApp = () => LAUNCHED_AS_APP;
 
 /* Must run before loadState()/initCloud(): both read the hash. */
 export function restoreLaunchRoom(){
-  const isApp = launchedAsApp();
+  const isApp = LAUNCHED_AS_APP;
   // Tidy the marker off the URL (a shared link copied from the app
   // shouldn't carry it). ?newTrip=1 is left for state.js to consume.
   if(/(?:^|[?&])source=pwa(?:&|$)/.test(location.search)){
@@ -57,6 +59,60 @@ export function restoreLaunchRoom(){
   try{ code = localStorage.getItem(LAST_ROOM_KEY); } catch(e){}
   if(code && /^[a-z0-9]{12,40}$/.test(code))
     history.replaceState(null, '', location.pathname + location.search + '#trip=' + code);
+}
+
+/* ---------- per-trip manifest (iOS) ----------
+   An iOS home-screen app starts with empty storage and opens at the
+   manifest's start_url, so the generic "./?source=pwa" gives it no trip at
+   all. While a shared trip is open in iOS Safari, the page links a manifest
+   whose start_url carries that trip instead — each home-screen icon is then
+   one trip, and it downloads and keeps its own copy on first launch. (If
+   Safari won't read the generated manifest, there is no other one linked,
+   and it falls back to the page's own URL — which carries the trip too.)
+   Elsewhere the static manifest.json stays: an installed Chrome/Edge app
+   shares the browser's storage, so restoreLaunchRoom() already finds the
+   last trip. */
+
+export function isIOS(){
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function roomManifestUrl(code, name){
+  const base = location.origin + location.pathname.replace(/[^/]*$/, '');
+  const label = (name || '').trim() || 'Travel Planner';
+  const manifest = {
+    id: base + '?trip=' + code,
+    name: label,
+    short_name: label.length > 20 ? label.slice(0, 19) + '…' : label,
+    start_url: base + '?source=pwa#trip=' + code,
+    scope: base,
+    display: 'standalone',
+    theme_color: '#C1502E',
+    background_color: '#E9DFC6',
+    icons: [
+      { src: base + 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: base + 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    ],
+  };
+  return 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(manifest));
+}
+
+/* Point the manifest link (and the home-screen label) at the trip on screen.
+   Call whenever the room or the trip's name may have changed. */
+export function syncManifest(tripName){
+  if(typeof document === 'undefined' || launchedAsApp()) return;
+  const code = roomInHash();
+  let link = document.querySelector('link[rel="manifest"]');
+  const href = isIOS() && code ? roomManifestUrl(code, tripName) : 'manifest.json';
+  if(!link){
+    link = document.createElement('link');
+    link.rel = 'manifest';
+    document.head.appendChild(link);
+  }
+  if(link.getAttribute('href') !== href) link.setAttribute('href', href);
+  const title = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+  if(title) title.setAttribute('content', code && tripName ? tripName : 'Travel');
 }
 
 /* ---------- which rooms this browser has opened ---------- */
