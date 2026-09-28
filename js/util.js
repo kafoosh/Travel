@@ -74,3 +74,46 @@ export function formatDayDate(d){
   if(!d) return '';
   return WEEKDAYS[d.getDay()] + ' ' + MONTHS[d.getMonth()] + ' ' + d.getDate();
 }
+
+/* Read a coordinate pair out of whatever a map app hands over when copied:
+   "41.9101438, 12.4983547", "(41.9101438, 12.4983547)", "41.91 12.49",
+   "41.91° N, 12.49° E", degrees-minutes-seconds (41°54'36.5"N 12°29'54.1"E),
+   or a Google Maps link carrying the pin (…!3d41.91!4d12.49) or view
+   (…/@41.91,12.49,17z). Returns { lat, lng } or null when the text isn't a
+   pair — an address, a lone number, something out of range. */
+const COORD = String.raw`([NSEW])?\s*([-+]?\d+(?:\.\d+)?)\s*°?\s*(?:(\d+(?:\.\d+)?)\s*['′’]\s*)?(?:(\d+(?:\.\d+)?)\s*(?:["″”]|'')\s*)?([NSEW])?`;
+const COORD_PAIR = new RegExp('^' + COORD + String.raw`(?:\s*[,;/]\s*|\s+|(?<=[NSEW°'′’"″”]))` + COORD + '$', 'i');
+
+export function parseLatLng(str){
+  let s = String(str == null ? '' : str).trim();
+  if(!s) return null;
+  if(/^https?:\/\//i.test(s)){
+    const m = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/.exec(s) ||
+              /[@=](-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/.exec(decodeURIComponent(s));
+    return m ? checkLatLng(Number(m[1]), Number(m[2])) : null;
+  }
+  s = s.replace(/^[([{]\s*/, '').replace(/\s*[)\]}]$/, '');
+  const m = COORD_PAIR.exec(s);
+  if(!m) return null;
+  const a = coordPart(m.slice(1, 6)), b = coordPart(m.slice(6, 11));
+  if(!a || !b) return null;
+  // Hemisphere letters can put longitude first ("12.49E 41.91N").
+  const swap = /[EW]/i.test(a.hemi) || /[NS]/i.test(b.hemi);
+  return swap ? checkLatLng(b.val, a.val) : checkLatLng(a.val, b.val);
+}
+
+function coordPart([pre, deg, min, sec, post]){
+  if(pre && post) return null;
+  const hemi = (pre || post || '').toUpperCase();
+  if((min && Number(min) >= 60) || (sec && Number(sec) >= 60)) return null;
+  if((min || sec) && deg.includes('.')) return null;
+  let val = Math.abs(Number(deg)) + (min ? Number(min) / 60 : 0) + (sec ? Number(sec) / 3600 : 0);
+  if(deg.startsWith('-') || hemi === 'S' || hemi === 'W') val = -val;
+  if(deg.startsWith('-') && hemi) return null;   // "-41.9 S" — contradictory
+  return { val: Math.round(val * 1e7) / 1e7, hemi };
+}
+
+function checkLatLng(lat, lng){
+  if(!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}

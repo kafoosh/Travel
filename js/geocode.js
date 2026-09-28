@@ -10,7 +10,7 @@
    coordinates).
    ========================================================= */
 
-import { esc, debounce } from './util.js';
+import { esc, debounce, parseLatLng } from './util.js';
 
 function baseOverride(key, fallback){
   try{ return localStorage.getItem(key) || fallback; } catch(e){ return fallback; }
@@ -45,7 +45,8 @@ function parseFeature(f){
   const p = f.properties || {};
   const [lng, lat] = (f.geometry && f.geometry.coordinates) || [null, null];
   const name = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || 'Unnamed place';
-  const where = [p.city || p.county, p.state, p.country].filter(Boolean).filter(x => x !== name);
+  const street = p.name && p.street ? [p.street, p.housenumber].filter(Boolean).join(' ') : '';
+  const where = [street, p.city || p.county, p.state, p.country].filter(Boolean).filter(x => x !== name);
   return {
     name,
     label: where.slice(0, 2).join(', '),
@@ -102,7 +103,9 @@ export function attachAutocomplete(input, onPick, onStatus){
 
   const run = debounce(async () => {
     const q = input.value.trim();
-    if(suppress || q.length < 3){ hide(); return; }
+    // A pasted coordinate pair is already an answer — the field's own input
+    // handler takes it; searching for "41.91, 12.49" would only add noise.
+    if(suppress || q.length < 3 || parseLatLng(q)){ hide(); return; }
     try{
       results = await search(q);
       activeIdx = -1;

@@ -6,7 +6,7 @@
    escaped before it touches innerHTML.
    ========================================================= */
 
-import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce } from './util.js';
+import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce, parseLatLng } from './util.js';
 import { CATEGORIES, AB_CATS, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
          newDay, serializeTrip, importText, blankTrip } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
@@ -4031,6 +4031,20 @@ function on(id, evt, fn){
 function ac(id, onPick, onStatus){
   if($(id)) attachAutocomplete($(id), onPick, onStatus);
 }
+/* A coordinate pair typed or pasted into `id` fills the lat/lng boxes. On the
+   lat/lng boxes themselves this is what splits a copied "(41.91, 12.49)"
+   across the two. */
+function coordsInto(id, latId, lngId, after){
+  on(id, 'input', () => {
+    const c = parseLatLng($(id).value);
+    if(!c) return;
+    $(latId).value = c.lat;
+    $(lngId).value = c.lng;
+    if(after) after();
+  });
+}
+/* An address pick shows where it is; it names the stop only if nothing has. */
+function placeLine(r){ return [r.name, r.label].filter(Boolean).join(', '); }
 
 export function wireStaticHandlers(){
   wireTabNav();
@@ -4201,6 +4215,23 @@ export function wireStaticHandlers(){
       $('al-coords-wrap').classList.remove('hidden');
     }
   });
+  ac('al-where', (r) => {
+    $('al-where').value = placeLine(r);
+    if(!$('al-name').value.trim()) $('al-name').value = r.name;
+    $('al-lat').value = r.lat;
+    $('al-lng').value = r.lng;
+    refreshCoordsStatus();
+  }, (status) => {
+    if((status.error || status.count === 0) && !$('al-lat').value.trim()){
+      $('al-coords-wrap').classList.remove('hidden');
+    }
+  });
+  coordsInto('al-where', 'al-lat', 'al-lng', refreshCoordsStatus);
+  coordsInto('al-lat', 'al-lat', 'al-lng', refreshCoordsStatus);
+  coordsInto('al-lng', 'al-lat', 'al-lng', refreshCoordsStatus);
+  coordsInto('al-end-search', 'al-endlat', 'al-endlng');
+  coordsInto('al-endlat', 'al-endlat', 'al-endlng');
+  coordsInto('al-endlng', 'al-endlat', 'al-endlng');
   ac('al-end-search', (r) => {
     $('al-end-search').value = r.name;
     $('al-endlat').value = r.lat;
@@ -4211,6 +4242,15 @@ export function wireStaticHandlers(){
     $('he-lat').value = r.lat;
     $('he-lng').value = r.lng;
   });
+  ac('he-where', (r) => {
+    $('he-where').value = placeLine(r);
+    if(!$('he-name').value.trim()) $('he-name').value = r.name;
+    $('he-lat').value = r.lat;
+    $('he-lng').value = r.lng;
+  });
+  coordsInto('he-where', 'he-lat', 'he-lng');
+  coordsInto('he-lat', 'he-lat', 'he-lng');
+  coordsInto('he-lng', 'he-lat', 'he-lng');
 
   // routed travel times landing → refresh the schedule quietly
   onRoutingUpdate(() => {
