@@ -2,7 +2,7 @@
    APP ENTRY — load state, wire the UI, attach cloud sync.
    ========================================================= */
 
-import { state, loadState, persistLocal, normalizeTrip, setCloudPushHook, setSaveGuard, backupRoomCache } from './state.js';
+import { state, loadState, openingDayIndex, persistLocal, normalizeTrip, setCloudPushHook, setSaveGuard, backupRoomCache } from './state.js';
 import { initCloud, resumeCloud, refreshRoom, scheduleCloudPush, roomFromUrl, cloud } from './cloud.js';
 import { renderAll, renderInfo, renderAiPlan, renderCloudUI, wireStaticHandlers, applyTheme, setView, setTripLoading,
   setTripLoadingText, showUpdateBanner, flashNote, updateUndoButton } from './ui.js';
@@ -24,6 +24,7 @@ function renderOpenTab(){
 restoreLaunchRoom();
 
 const restored = loadState();
+state.currentDayIndex = openingDayIndex();   // a pinned day is the one the trip opens on
 applyTheme();
 wireStaticHandlers();
 
@@ -40,6 +41,7 @@ const awaitingRoom = !!roomFromUrl() && !restored && cloud.configured;
 let patience = null;
 let savedNoticeShown = false;
 let rendered = false;
+let roomLanded = false;
 
 /* Draw the trip. The first call also takes the loading gate down; later ones
    (a remote edit landing) are ordinary re-renders. */
@@ -153,6 +155,10 @@ initCloud({
     if(rendered && JSON.stringify(next) === JSON.stringify(state.trip)) return;
     backupRoomCache(t); // an emptied room syncing down leaves a recoverable copy
     state.trip = next;
+    // A room this device had no copy of opens on its pinned day, like a cached
+    // one does at boot. Later syncs leave the viewed day alone.
+    if(!restored && !roomLanded) state.currentDayIndex = openingDayIndex();
+    roomLanded = true;
     persistLocal();     // not saveState() — that would echo the change back up
     renderTrip();
     /* An installed app's first sight of its trip — on iOS, the first launch

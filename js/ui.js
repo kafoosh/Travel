@@ -336,9 +336,10 @@ function renderTabs(){
     const date = dayDate(trip().startDate, i);
     btn.innerHTML =
       '<span class="d-top"><span class="d-num">D' + d.id + '</span>' +
+      (d.pinned ? '<span class="d-pin" aria-label="pinned">📌</span>' : '') +
       (date ? '<span class="d-date">' + formatDayDate(date) + '</span>' : '') + '</span>' +
       '<span class="d-title">' + esc(d.title) + '</span>';
-    btn.title = d.title + (date ? ' · ' + formatDayDate(date) : '') +
+    btn.title = d.title + (date ? ' · ' + formatDayDate(date) : '') + (d.pinned ? ' · pinned — the trip opens here' : '') +
       (stopsLocked() ? '' : ' — drag to reorder the trip (or focus and press Shift + ← / →)');
     btn.addEventListener('click', () => { state.currentDayIndex = i; renderAll(); });
 
@@ -531,6 +532,8 @@ function renderDayPanel(){
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         ${date ? `<span class="day-date-tag">${formatDayDate(date)}</span>` : ''}
         <span class="day-progress${dayProgressText(day) ? '' : ' hidden'}" id="day-progress" title="Stops ticked off on this day">${dayProgressText(day)}</span>
+        <button class="reset-btn pin-day-btn${day.pinned ? ' active' : ''}" id="pin-day-btn" aria-pressed="${day.pinned ? 'true' : 'false'}"
+          title="${day.pinned ? 'Pinned — the trip opens on this day. Click to unpin' : 'Pin this day — the trip will open on it'}">📌${day.pinned ? ' Pinned' : ''}</button>
         <button class="reset-btn" id="edit-day-btn">✎ Edit day</button>
         <button class="reset-btn" id="gmaps-day-btn" title="Open this day's route in Google Maps — shareable on any device">Google Maps</button>
         <button class="reset-btn" id="add-location-btn">+ Add location</button>
@@ -557,6 +560,16 @@ function renderDayPanel(){
     </div>
   `;
 
+  $('pin-day-btn').addEventListener('click', () => {
+    // One pinned day per trip: pinning this one unpins any other.
+    pushUndo();
+    const pin = !day.pinned;
+    trip().days.forEach(d => { d.pinned = false; });
+    day.pinned = pin;
+    saveState();
+    renderAll();
+    if(!isViewOnly()) flashNote(pin ? '📌 Day ' + day.id + ' pinned — the trip opens here.' : 'Day ' + day.id + ' unpinned.');
+  });
   $('edit-day-btn').addEventListener('click', () => openDayEdit(state.currentDayIndex));
   $('gmaps-day-btn').addEventListener('click', () => openGmapsPicker(day));
   $('add-location-btn').addEventListener('click', () => openLocationForm(null, day.id));

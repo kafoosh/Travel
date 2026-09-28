@@ -307,7 +307,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
    controls stay where they are — so the page keeps its shape and done /
    hidden states still read — but are dimmed and can't be pressed. Anything
    reached another way is caught by the save guard in js/app.js. */
-html.view-only :is(#add-location-btn, #edit-day-btn, #optimize-order, #add-hotel-btn,
+html.view-only :is(#add-location-btn, #edit-day-btn, #pin-day-btn, #optimize-order, #add-hotel-btn,
   .done-btn, .hide-btn, .bin-btn, .move-to-day, .mode-opt,
   #modal-done, #modal-hide, #modal-edit, #modal-bin,
   .check-add, .check-tick, .check-del, .ic-edit, .og-add, .og-rename, .og-del,
@@ -420,6 +420,7 @@ html.view-only .modal-notes{ border-style:solid; background:transparent; }
 }
 .daytab .d-num{font-weight:600;color:var(--ink);}
 .daytab .d-date{color:var(--ink-soft); opacity:.85;}
+.daytab .d-pin{font-size:10px; line-height:1;}
 .daytab .d-title{
   max-width:100%;
   min-width:0;
@@ -495,6 +496,9 @@ html.view-only .modal-notes{ border-style:solid; background:transparent; }
 }
 .reset-btn:hover{border-color:var(--ink);color:var(--ink);}
 .reset-btn.danger{border-color:var(--danger); color:var(--danger);}
+.pin-day-btn{filter:grayscale(1); opacity:.75;}
+.pin-day-btn:hover{filter:none; opacity:1;}
+.pin-day-btn.active{filter:none; opacity:1; border-color:var(--accent); color:var(--accent-dark); font-weight:500;}
 .reset-btn.danger:hover{background:var(--danger); color:#fff;}
 
 .hotel-toggle{

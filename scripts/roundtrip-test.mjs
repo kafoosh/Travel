@@ -366,6 +366,13 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
     })());
     check('an untouched trip writes no hide start/end lines',
       !serializeTrip(parseTrip(md).trip).match(/^- hide (start|end):/m));
+    check('a pinned day survives a round-trip, and only that day', (() => {
+      const pt = parseTrip(md).trip;
+      pt.days[3].pinned = true;
+      const back = parseTrip(serializeTrip(pt)).trip;
+      return back.days[3].pinned === true && back.days.filter(d => d.pinned).length === 1
+        && !serializeTrip(parseTrip(md).trip).match(/^- pinned:/m);
+    })());
 
     /* --- 5b. point-to-point travel legs (the Rome → Venice transfer day) --- */
     console.log('point-to-point legs:');

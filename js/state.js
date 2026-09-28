@@ -92,6 +92,7 @@ export function normalizeTrip(t){
       startHotelId, endHotelId,
       returnBy: ['walk','cycle','transit','taxi','boat'].includes(d.returnBy) ? d.returnBy : null,
       color: DAY_COLORS[d.color] ? d.color : null,
+      pinned: !!d.pinned,
       order: Array.isArray(d.order) ? d.order.filter(id => t.stops && t.stops[id]) : [],
     };
   });
@@ -99,6 +100,10 @@ export function normalizeTrip(t){
   // Room-wide "itinerary locked in": drag and keyboard reordering of stops
   // (and days) is switched off for everyone on the link. Toggled on Info.
   trip.stopsLocked = !!t.stopsLocked;
+  // One pinned day at most — the tab the trip opens on. Two devices pinning
+  // different days at once could merge into two; the earlier one wins.
+  let pinSeen = false;
+  trip.days.forEach(d => { if(d.pinned && pinSeen) d.pinned = false; if(d.pinned) pinSeen = true; });
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
   trip.days.forEach(d => {
     if(d.startHotelId && !trip.hotels.some(h => h.id === d.startHotelId)) d.startHotelId = null;
@@ -220,9 +225,14 @@ export function popUndo(){
   } catch(e){ return false; }
 }
 
+/* The day a trip opens on: its pinned day, else the first. */
+export function openingDayIndex(trip = state.trip){
+  return Math.max(0, trip.days.findIndex(d => d.pinned));
+}
+
 export function replaceTrip(trip){
   state.trip = normalizeTrip(trip);
-  state.currentDayIndex = 0;
+  state.currentDayIndex = openingDayIndex();
   saveState();
 }
 
