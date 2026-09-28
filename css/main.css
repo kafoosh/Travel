@@ -2428,3 +2428,37 @@ footer code{background:var(--paper-card);padding:2px 6px;border-radius:5px;}
   .daytabs-nav{ display:none !important; }
   .wrap{ padding-bottom:0; }
 }
+
+/* Stop numbers double as the phone's reorder control (the slot picker). On
+   a desktop they stay inert labels — the grip does the moving there. */
+button.stop-number{ border:none; padding:0; cursor:default; pointer-events:none; }
+@media (max-width: 860px){
+  button.stop-number{
+    pointer-events:auto; cursor:pointer;
+    /* a 26px disc, but a 44px touch target */
+    position:relative;
+    /* a soft halo marks it as something to tap, not just a label */
+    box-shadow:0 0 0 3px var(--accent-tint);
+  }
+  button.stop-number::after{ content:''; position:absolute; inset:-9px; }
+  button.stop-number:focus-visible{ outline:2px solid var(--gold); outline-offset:2px; }
+  /* The number replaces the finger drag on a phone — the grip goes. */
+  .stop-card .stop-controls{ display:none; }
+
+  #slot-sheet .sheet-panel{ max-height:70vh; max-height:70dvh; }
+  .slot-head{
+    margin:0 4px 6px; font-size:14px; color:var(--ink-soft);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .slot-head b{ color:var(--ink); }
+  .slot-list{
+    display:flex; flex-direction:column; gap:2px;
+    overflow-y:auto; overscroll-behavior:contain; min-height:0;
+  }
+  .sheet-panel .slot-opt{ flex:none; }
+  .slot-opt .stop-number{ align-self:center; }
+  .slot-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .slot-meta{ flex:none; font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft); }
+  .sheet-panel .slot-opt.current{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; cursor:default; }
+  .sheet-panel .slot-opt:disabled{ opacity:1; }
+}

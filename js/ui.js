@@ -874,6 +874,7 @@ function renderScheduleList(day, sched){
   }
 
   let mapOrder = 0;
+  const slotBadges = [];   // each card's number as shown, in list order — the slot picker's rows
   if(startHotel && leadTransfer){
     const firstStop = rows.find(r => r.stop.lat != null);
     list.appendChild(travelConnector(leadTransfer.minutes, leadTransfer.mode, leadTransfer.live,
@@ -901,9 +902,17 @@ function renderScheduleList(day, sched){
     // the ones the cards carry, with the hidden stop's simply missing.
     const hasMapPin = s.lat != null && s.lng != null;
     if(hasMapPin) mapOrder += 1;
-    const numberBadgeHtml = hasMapPin
-      ? `<span class="stop-number${s.hidden ? ' off-map' : ''}"${s.hidden ? ' title="Hidden from the map — the number stays with the stop"' : ''}>${mapOrder}</span>`
-      : `<span class="stop-number no-pin" title="No coordinates — not shown on map">–</span>`;
+    const badgeLabel = hasMapPin ? String(mapOrder) : '–';
+    slotBadges.push({ id: s.id, label: badgeLabel, noPin: !hasMapPin, name: s.name, start: row.start });
+    const badgeClass = 'stop-number' + (hasMapPin ? (s.hidden ? ' off-map' : '') : ' no-pin');
+    const badgeTitle = hasMapPin
+      ? (s.hidden ? 'Hidden from the map — the number stays with the stop' : '')
+      : 'No coordinates — not shown on map';
+    // On a phone the number is the way to reorder: tap it for a slot picker
+    // (see openSlotPicker). Dragging by finger fights the page scroll.
+    const numberBadgeHtml = stopsLocked()
+      ? `<span class="${badgeClass}"${badgeTitle ? ` title="${badgeTitle}"` : ''}>${badgeLabel}</span>`
+      : `<button type="button" class="${badgeClass} slot-btn"${isPhone() ? '' : ' tabindex="-1"'}${badgeTitle ? ` title="${badgeTitle}"` : ''} aria-label="Stop ${esc(badgeLabel)}: move ${esc(s.name)} to another slot">${badgeLabel}</button>`;
 
     const chips = s.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('') +
       (s.notes ? `<span class="tag-chip note-chip" title="${esc(s.notes)}">📝 note</span>` : '');
@@ -958,6 +967,11 @@ function renderScheduleList(day, sched){
     wireDoneBtn(card, s.id, () => refreshDayProgress(day));
     wireHideBtn(card, s.id, () => renderMap(day, sched));
     card.querySelector('.bin-btn').addEventListener('click', (e) => { e.stopPropagation(); removeToBin(day, s.id); });
+    const slotBtn = card.querySelector('.slot-btn');
+    if(slotBtn) slotBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if(isPhone()) openSlotPicker(day, s.id, slotBadges, slotBtn);
+    });
 
     card.addEventListener('click', (e) => {
       const selObj = window.getSelection();
@@ -1181,6 +1195,76 @@ function moveStop(day, id, delta){
   saveState();
   renderDayPanel();
   updateUndoButton();
+}
+
+/* Move a stop to slot `toIdx` of its own day: the stop takes that position
+   and the rest close up around it. */
+function moveStopToSlot(day, id, toIdx){
+  const order = day.order;
+  const fromIdx = order.indexOf(id);
+  if(fromIdx === -1 || toIdx < 0 || toIdx >= order.length || toIdx === fromIdx || stopsLocked()) return;
+  pushUndo();
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, id);
+  saveState();
+  pendingFlash = { id, until: Date.now() + 1800 };   // show where it landed
+  renderDayPanel();
+  updateUndoButton();
+  const card = document.querySelector(`.stop-card[data-id="${CSS.escape(id)}"]`);
+  if(card) card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/* Phone reordering: a bottom sheet listing the day's slots, numbered as the
+   cards are. Picking one moves the stop there — dragging a card by finger
+   through a long, scrolling list was too fiddly to be the way. */
+const isPhone = () => window.matchMedia('(max-width: 860px)').matches;
+
+function openSlotPicker(day, id, slots, trigger){
+  closeSlotPicker();
+  const s = trip().stops[id];
+  if(!s || stopsLocked()) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'slot-sheet';
+  wrap.innerHTML = `
+    <div class="sheet-backdrop"></div>
+    <div class="sheet-panel slot-panel" role="dialog" aria-modal="true" aria-labelledby="slot-sheet-title">
+      <p class="slot-head" id="slot-sheet-title">Move <b>${esc(s.name)}</b> to…</p>
+      <div class="slot-list"></div>
+    </div>`;
+  const listEl = wrap.querySelector('.slot-list');
+  slots.forEach(slot => {
+    const toIdx = day.order.indexOf(slot.id);
+    if(toIdx === -1) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    const here = slot.id === id;
+    b.className = 'slot-opt' + (here ? ' current' : '');
+    b.disabled = here;
+    b.innerHTML = `<span class="stop-number${slot.noPin ? ' no-pin' : ''}">${esc(slot.label)}</span>` +
+      `<span class="slot-name">${esc(slot.name)}</span>` +
+      `<span class="slot-meta">${here ? 'here now' : formatTime(slot.start)}</span>`;
+    if(!here) b.addEventListener('click', () => { closeSlotPicker(); moveStopToSlot(day, id, toIdx); });
+    listEl.appendChild(b);
+  });
+  const onKey = (e) => { if(e.key === 'Escape'){ e.preventDefault(); closeSlotPicker(); } };
+  wrap.querySelector('.sheet-backdrop').addEventListener('click', () => closeSlotPicker());
+  document.addEventListener('keydown', onKey, true);
+  wrap._close = () => {
+    document.removeEventListener('keydown', onKey, true);
+    if(trigger && trigger.isConnected && wrap.contains(document.activeElement)) trigger.focus();
+  };
+  document.body.appendChild(wrap);
+  const cur = listEl.querySelector('.slot-opt.current');
+  if(cur) cur.scrollIntoView({ block: 'center' });
+  const first = listEl.querySelector('.slot-opt:not(:disabled)');
+  if(first) first.focus({ preventScroll: true });
+}
+
+function closeSlotPicker(){
+  const el = document.getElementById('slot-sheet');
+  if(!el) return;
+  if(el._close) el._close();
+  el.remove();
 }
 
 /* Reorder within a day, or place a stop dragged in from the Unassigned tray
