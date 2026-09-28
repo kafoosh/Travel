@@ -875,6 +875,15 @@ function renderScheduleList(day, sched){
 
   let mapOrder = 0;
   const slotBadges = [];   // each card's number as shown, in list order — the slot picker's rows
+  if(sched.movedFor){
+    // The day sets off before its own start time, to make a fixed start.
+    const early = document.createElement('div');
+    early.className = 'travel-connector';
+    early.innerHTML = '⏰ Set off ' + formatTime(sched.startTime) + ' — earlier than the day’s ' +
+      formatTime(parseTime(day.start)) + ' start, to make ' + esc(sched.movedFor.name) + ' at ' +
+      formatTime(parseTimeStr(sched.movedFor.fixedStart));
+    list.appendChild(early);
+  }
   if(startHotel && leadTransfer){
     const firstStop = rows.find(r => r.stop.lat != null);
     list.appendChild(travelConnector(leadTransfer.minutes, leadTransfer.mode, leadTransfer.live,
@@ -2901,7 +2910,7 @@ function renderDayMapsOverlay(plan, opts){
     el.innerHTML = `
       <div class="ap-head">
         <b>Day ${day.id}${day.title && day.title !== 'Day ' + day.id ? ' — ' + esc(shortTitle(day.title)) : ''}</b> · ${day.order.length} stop${day.order.length === 1 ? '' : 's'}
-        ${sched.rows.length ? ' · ' + formatTime(parseTime(day.start)) + ' – ' + formatTime(sched.returnTime) : ''}
+        ${sched.rows.length ? ' · ' + formatTime(sched.startTime) + ' – ' + formatTime(sched.returnTime) : ''}
         ${sched.walkKm > 0.05 ? ' · 🚶 ' + sched.walkKm.toFixed(1) + ' km' : ''}
         ${over ? ' <span class="late-chip">⚠ runs late — consider more days</span>' : ''}
       </div>

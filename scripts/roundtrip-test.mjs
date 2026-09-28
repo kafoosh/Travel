@@ -373,6 +373,24 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       return back.days[3].pinned === true && back.days.filter(d => d.pinned).length === 1
         && !serializeTrip(parseTrip(md).trip).match(/^- pinned:/m);
     })());
+    check('a pin stripped by an older build is restored from the trip-level mirror', (() => {
+      const pt = normalizeTrip(parseTrip(md).trip);
+      pt.days[2].pinned = true;
+      const synced = normalizeTrip(pt);
+      if(synced.pinnedDay !== 3) return false;
+      // What an older device writes back: every day rebuilt without `pinned`.
+      const stripped = { ...synced, days: synced.days.map(({ pinned, ...d }) => d) };
+      const back = normalizeTrip(stripped);
+      return back.days[2].pinned === true && back.days.filter(d => d.pinned).length === 1;
+    })());
+    check('unpinning clears the mirror, so the pin stays gone', (() => {
+      const pt = normalizeTrip(parseTrip(md).trip);
+      pt.days[2].pinned = true;
+      const synced = normalizeTrip(pt);
+      synced.days[2].pinned = false;
+      synced.pinnedDay = null;     // what saveState's mirror sync writes
+      return normalizeTrip(synced).days.every(d => !d.pinned);
+    })());
 
     /* --- 5b. point-to-point travel legs (the Rome → Venice transfer day) --- */
     console.log('point-to-point legs:');
@@ -390,6 +408,29 @@ import('../js/routing.js').then(({ heuristicLeg }) => {
       pts6.some(p => p.num === '1b' && / \(arrival\)$/.test(p.label)));
     check('day 6 runs hotel → station → arrival → … → hotel',
       pts6[0].cat === 'hotel' && pts6[1].num === '1' && pts6[pts6.length - 1].cat === 'hotel');
+
+    /* --- 5c. a fixed start before the day's own start time --- */
+    console.log('early fixed start:');
+    const et = normalizeTrip(parseTrip(md).trip);
+    const ed = et.days.find(d => d.startHotelId && d.order.length >= 2 && d.order.every(id => !et.stops[id].fixedStart));
+    ed.start = '09:00';
+    const first = et.stops[ed.order[0]];
+    first.fixedStart = '07:55';
+    const es = computeSchedule(et, ed);
+    check('the first stop starts at its fixed time, not after the day start + commute',
+      es.rows[0].start === 7 * 60 + 55 && es.rows[0].late === 0, 'starts ' + es.rows[0].start);
+    check('the day sets off early enough to make it',
+      es.startTime + (es.leadTransfer ? es.leadTransfer.minutes : 0) === 7 * 60 + 55 && es.movedFor === first,
+      'sets off ' + es.startTime);
+    first.fixedStart = null;
+    et.stops[ed.order[1]].fixedStart = '06:00';
+    const es2 = computeSchedule(et, ed);
+    check('stops before the first fixed start move earlier with it',
+      es2.rows[1].start === 6 * 60 && es2.rows[0].start < 6 * 60);
+    et.stops[ed.order[1]].fixedStart = '23:00';
+    const es3 = computeSchedule(et, ed);
+    check('a later fixed start still waits, and the day keeps its own start',
+      es3.startTime === 9 * 60 && es3.movedFor === null && es3.rows[1].waitBefore > 0);
 
     /* --- 6. offline export --- */
     import('../js/offline.js').then(({ buildOfflineHtml, offlineFileName, photoUrls }) => {
