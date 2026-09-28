@@ -25,6 +25,7 @@ restoreLaunchRoom();
 
 const restored = loadState();
 state.currentDayIndex = openingDayIndex();   // a pinned day is the one the trip opens on
+const bootDayIndex = state.currentDayIndex;
 applyTheme();
 wireStaticHandlers();
 
@@ -155,9 +156,12 @@ initCloud({
     if(rendered && JSON.stringify(next) === JSON.stringify(state.trip)) return;
     backupRoomCache(t); // an emptied room syncing down leaves a recoverable copy
     state.trip = next;
-    // A room this device had no copy of opens on its pinned day, like a cached
-    // one does at boot. Later syncs leave the viewed day alone.
-    if(!restored && !roomLanded) state.currentDayIndex = openingDayIndex();
+    // The room's first copy decides the opening day: a device with no copy
+    // opens on its pinned day, and so does one whose cached copy was stale
+    // (pinned elsewhere since) — unless someone has already moved off the
+    // day it opened on. Later syncs leave the viewed day alone.
+    if(!roomLanded && (!restored || (state.currentView === 'days' && state.currentDayIndex === bootDayIndex)))
+      state.currentDayIndex = openingDayIndex();
     roomLanded = true;
     persistLocal();     // not saveState() — that would echo the change back up
     renderTrip();

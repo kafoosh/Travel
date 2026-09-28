@@ -104,6 +104,14 @@ export function normalizeTrip(t){
   // different days at once could merge into two; the earlier one wins.
   let pinSeen = false;
   trip.days.forEach(d => { if(d.pinned && pinSeen) d.pinned = false; if(d.pinned) pinSeen = true; });
+  // Trip-level mirror of the pin (its day number). A device still running an
+  // older build rebuilds every day from a fixed list of fields and drops
+  // `pinned` when it writes the room back — but it keeps unknown trip-level
+  // keys. So a trip with no pinned day and a mirror is one such a device
+  // stripped: put the pin back. An unpin here clears both.
+  if(!pinSeen && Number.isInteger(t.pinnedDay) && trip.days[t.pinnedDay - 1])
+    trip.days[t.pinnedDay - 1].pinned = true;
+  syncPinMirror(trip);
   trip.hotels = (t.hotels || []).filter(h => h && h.name);
   trip.days.forEach(d => {
     if(d.startHotelId && !trip.hotels.some(h => h.id === d.startHotelId)) d.startHotelId = null;
@@ -159,9 +167,17 @@ export function normalizeTrip(t){
   return trip;
 }
 
+/* Local edits (pinning, moving or deleting days) change the days directly,
+   so the mirror is refreshed on every save rather than trusted from load. */
+function syncPinMirror(trip){
+  const idx = trip.days.findIndex(d => d.pinned);
+  trip.pinnedDay = idx >= 0 ? idx + 1 : null;
+}
+
 /* Write to this browser only. Applying an incoming change from another
    device uses this rather than saveState(), so it doesn't bounce back out. */
 export function persistLocal(){
+  syncPinMirror(state.trip);
   try{
     const payload = JSON.stringify({ trip: state.trip });
     const code = currentRoomCode();   // checked live: sharing mid-session moves saves to the room key

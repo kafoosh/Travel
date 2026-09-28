@@ -12,7 +12,10 @@
      different hotel (a check-out/check-in day)
    - fixed start times on stops (flight lands 14:30, timed
      museum entry…): the schedule waits when early and flags
-     the overrun when late
+     the overrun when late. The day's first fixed start is the
+     exception to "late": the day's start time is a default,
+     not a promise, so when the stops before it can't make it
+     from there, the day sets off earlier instead
    - point-to-point stops (hike, train/travel, flight, boat):
      start at (lat,lng), optionally end at (endLat,endLng).
      The commute runs to the start point, the stop's duration
@@ -43,10 +46,28 @@ export function departPoint(stop){
 }
 
 export function computeSchedule(trip, day){
+  const planned = parseTime(day.start);
+  const sched = walkDay(trip, day, planned);
+  // A 07:55 train on a day set to start at 09:00 is the plan being early,
+  // not the train being missed: leave in time for it. Only the first fixed
+  // start moves the day — every later one is timed from the stops before it.
+  const firstFixed = sched.rows.find(r => r.fixed);
+  if(!firstFixed || firstFixed.late <= 0) return sched;
+  const earlier = walkDay(trip, day, Math.max(0, planned - firstFixed.late));
+  // Travel estimates can shift with the departure time (transit timetables);
+  // one more nudge settles any leftover minutes.
+  const still = earlier.rows.find(r => r.fixed);
+  const fixed = (still && still.late > 0 && earlier.startTime > 0)
+    ? walkDay(trip, day, Math.max(0, earlier.startTime - still.late)) : earlier;
+  fixed.movedFor = fixed.rows.find(r => r.fixed).stop;
+  return fixed;
+}
+
+function walkDay(trip, day, startTime){
   const dayIdx = trip.days.indexOf(day);
   const date = dayDate(trip.startDate, dayIdx);
   const order = day.order;
-  let t = parseTime(day.start);
+  let t = startTime;
   const rows = [];
   let prev = null;
   let leadTransfer = null;
@@ -93,8 +114,9 @@ export function computeSchedule(trip, day){
 
     // Fixed-clock stops (flights, trains, timed entries): wait if early,
     // flag the overrun if the plan arrives late.
-    let waitBefore = 0, late = 0;
+    let waitBefore = 0, late = 0, fixed = false;
     if(stop.fixedStart && /^\d{1,2}:\d{2}$/.test(stop.fixedStart)){
+      fixed = true;
       const fs = parseTime(stop.fixedStart);
       if(t < fs){ waitBefore = fs - t; t = fs; }
       else if(t > fs){ late = t - fs; }
@@ -122,7 +144,7 @@ export function computeSchedule(trip, day){
       stop, start: startMin, end: t,
       travelBefore: (rows.length === 0 && leadTransfer) ? 0 : travel,
       travelMode: mode, travelLive: live, travelPath: path,
-      waitBefore, late, hikeLeg,
+      waitBefore, late, fixed, hikeLeg,
     });
     if(dep) prev = dep;
   });
@@ -137,5 +159,8 @@ export function computeSchedule(trip, day){
     }
   }
 
-  return { rows, leadTransfer, trailTransfer, returnTime: t, startHotel, endHotel, date, walkKm, otherKm };
+  // startTime: when the day actually sets off — the day's own start, or
+  // earlier when computeSchedule moved it for a fixed start (movedFor).
+  return { rows, leadTransfer, trailTransfer, returnTime: t, startTime, movedFor: null,
+    startHotel, endHotel, date, walkKm, otherKm };
 }

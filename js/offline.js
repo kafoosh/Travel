@@ -307,7 +307,7 @@ function dayHtml(trip, day, idx, opts){
 
   const facts = [
     date ? formatDayDate(date) : null,
-    'starts ' + formatTime(parseTime(day.start)),
+    'starts ' + formatTime(sched.startTime),
     sched.rows.length + (sched.rows.length === 1 ? ' stop' : ' stops'),
     visitMin ? formatDur(visitMin) + ' of visits' : null,
     sched.rows.some(r => r.stop.done)
