@@ -62,8 +62,9 @@ export function newDay(n){
   // hideStart / hideEnd: that end of the day is off the map — its hotel pin
   // and the leg to or from it aren't drawn. A display flag, like a stop's
   // `hidden`: the schedule still departs from and returns to the hotel.
+  // pinned: the day the trip opens on (at most one per trip).
   return { id:n, title:'Day ' + n, start:'09:00', startHotelId:null, endHotelId:null, returnBy:null,
-    color:null, hideStart:false, hideEnd:false, order:[] };
+    color:null, hideStart:false, hideEnd:false, pinned:false, order:[] };
 }
 
 export function blankTrip(){
@@ -170,6 +171,7 @@ export function serializeTrip(trip){
     // Written only when set, so a day nobody has touched reads as it always did.
     if(d.hideStart) L.push('- hide start: yes');
     if(d.hideEnd) L.push('- hide end: yes');
+    if(d.pinned) L.push('- pinned: yes');
     L.push('');
     d.order.forEach(id => {
       const s = trip.stops[id];
@@ -262,6 +264,7 @@ const KEY_ALIASES = {
   done:'done', visited:'done', completed:'done', seen:'done',
   hidden:'hidden', hide:'hidden', 'off map':'hidden', 'hide on map':'hidden',
   'hide start':'hideStart', 'hide end':'hideEnd',
+  pinned:'pinned', pin:'pinned',
   tags:'tags',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
@@ -327,7 +330,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|hide start|hide end|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|hide start|hide end|pinned|pin|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -502,6 +505,7 @@ export function parseTrip(text){
         else if(key === 'returnBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) section.returnBy = v; }
         else if(key === 'hideStart') section.hideStart = isYes(value);
         else if(key === 'hideEnd') section.hideEnd = isYes(value);
+        else if(key === 'pinned') section.pinned = isYes(value);
         else if(key === 'color' && DAY_COLORS[value.toLowerCase()]) section.color = value.toLowerCase();
       } else if(!section){
         // trip-level metadata
