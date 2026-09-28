@@ -225,16 +225,17 @@
         <label>Category<select id="al-cat"></select></label>
         <label>Duration (minutes)<input type="number" id="al-dur" value="60" min="5" step="5" required></label>
         <label>Fixed start time (optional — flight landing, train departure, timed entry)<input type="time" id="al-fixed"></label>
+        <label>Address or coordinates<input type="text" id="al-where" placeholder="Search an address, or paste 41.9101, 12.4983"></label>
         <p class="al-coords-status" id="al-coords-status">No coordinates yet — pick a search suggestion above, or <button type="button" class="linklike" id="al-coords-toggle">enter them manually</button>.</p>
         <div id="al-coords-wrap" class="hidden">
           <div class="al-coords">
             <label>Latitude<input type="text" id="al-lat" placeholder="e.g. 41.8986"></label>
             <label>Longitude<input type="text" id="al-lng" placeholder="e.g. 12.4769"></label>
           </div>
-          <p class="al-hint">Right-click a spot on any online map and copy the coordinates. Without them the stop still works, but won't appear on the map or in travel times.</p>
+          <p class="al-hint">Right-click a spot on any online map and copy the coordinates — a pair as copied, like (41.9101, 12.4983), can be pasted straight into either box. Without them the stop still works, but won't appear on the map or in travel times.</p>
         </div>
         <div id="al-end-wrap" class="hidden">
-          <label>Ends at (search)<input type="text" id="al-end-search" placeholder="Search the arrival station / end point…"></label>
+          <label>Ends at — search, address or coordinates<input type="text" id="al-end-search" placeholder="Search the arrival station / end point…"></label>
           <div class="al-coords">
             <label>End latitude<input type="text" id="al-endlat"></label>
             <label>End longitude<input type="text" id="al-endlng"></label>
@@ -294,6 +295,7 @@
       <form id="hotel-edit-form" class="add-location-form">
         <input type="hidden" id="he-editing" value="">
         <label>Name<input type="text" id="he-name" required></label>
+        <label>Address or coordinates<input type="text" id="he-where" placeholder="Search an address, or paste 41.9053, 12.4886"></label>
         <div class="al-coords">
           <label>Latitude<input type="text" id="he-lat" placeholder="e.g. 41.9053"></label>
           <label>Longitude<input type="text" id="he-lng" placeholder="e.g. 12.4886"></label>
