@@ -1549,7 +1549,9 @@ function openModal(stopId, row){
   const photo = $('modal-photo');
   if(stop.img) mountImage(photo, stop.img, ICONS[stop.cat] || '📍', { alt: stop.name });
   else { photo.textContent = ICONS[stop.cat] || '📍'; photo.classList.remove('has-img'); }
-  $('modal-time-row').textContent = row ? (formatTime(row.start) + ' · ' + formatDur(stop.dur)) : formatDur(stop.dur);
+  $('modal-time-row').textContent = row
+    ? (formatTime(row.start) + ' – ' + formatTime(row.end) + ' · ' + formatDur(stop.dur))
+    : formatDur(stop.dur);
   $('modal-title').textContent = stop.name;
   $('modal-tags').innerHTML = stop.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('');
   const full = stop.detail ? (stop.desc + '\n\n' + stop.detail) : stop.desc;
