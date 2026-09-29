@@ -484,6 +484,20 @@ html.view-only .modal-notes{ border-style:solid; background:transparent; }
   color:#fff;
   background:var(--accent);
 }
+/* The day's start time rides beside the date chip — same pill, outlined so
+   the date stays the lead. "moved" marks a day that sets off early for a
+   fixed start. */
+.day-start-tag{
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  letter-spacing:.08em;
+  padding:3px 9px;
+  border-radius:999px;
+  border:1px solid var(--accent);
+  color:var(--accent-dark);
+  background:var(--accent-tint);
+}
+.day-start-tag.moved{border-color:var(--gold); color:var(--gold);}
 .reset-btn{
   font-family:'IBM Plex Mono', monospace;
   font-size:12px;
@@ -1555,7 +1569,7 @@ body.drag-active *{cursor:grabbing !important;}
     gap:8px;
     align-items:center;
   }
-  .daypanel-head .day-date-tag{ flex:0 0 auto; }
+  .daypanel-head .day-date-tag, .daypanel-head .day-start-tag{ flex:0 0 auto; }
   /* Compact action buttons: size to their label and wrap, instead of a
      two-per-row grid that ate three rows of screen. */
   .reset-btn{ min-height:40px; padding:8px 11px; flex:0 1 auto; font-size:11.5px; }

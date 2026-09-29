@@ -531,6 +531,9 @@ function renderDayPanel(){
       <h2>Day ${day.id} — ${esc(day.title)}</h2>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         ${date ? `<span class="day-date-tag">${formatDayDate(date)}</span>` : ''}
+        <span class="day-start-tag${sched.movedFor ? ' moved' : ''}" title="${sched.movedFor
+          ? 'Sets off ' + formatTime(sched.startTime) + ' — earlier than the day’s ' + formatTime(parseTime(day.start)) + ' start, to make ' + esc(sched.movedFor.name)
+          : 'The day starts at ' + formatTime(sched.startTime)}">▶ ${formatTime(sched.startTime)}</span>
         <span class="day-progress${dayProgressText(day) ? '' : ' hidden'}" id="day-progress" title="Stops ticked off on this day">${dayProgressText(day)}</span>
         <button class="reset-btn pin-day-btn${day.pinned ? ' active' : ''}" id="pin-day-btn" aria-pressed="${day.pinned ? 'true' : 'false'}"
           title="${day.pinned ? 'Pinned — the trip opens on this day. Click to unpin' : 'Pin this day — the trip will open on it'}">📌${day.pinned ? ' Pinned' : ''}</button>
