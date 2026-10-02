@@ -184,6 +184,9 @@
       <div class="modal-time-row" id="modal-time-row"></div>
       <h3 class="modal-title" id="modal-title"></h3>
       <div class="modal-tags" id="modal-tags"></div>
+      <!-- Meal options: which place this is, flick to another, add or drop one.
+           Filled in by paintModalOptions; empty for anything but a food stop. -->
+      <div class="modal-options" id="modal-options"></div>
       <!-- What you came here to do sits in reach, under the title — the
            description reads below it. Labels and icons are filled in by
            openModal / paintModalDone / paintModalHide. -->
@@ -220,11 +223,15 @@
       <h3 class="modal-title" id="al-heading">Add a location</h3>
       <form id="add-location-form" class="add-location-form">
         <input type="hidden" id="al-editing" value="">
+        <!-- Set when the form adds another place to a meal (see paintModalOptions):
+             the slot's day, category and fixed time aren't the place's to change. -->
+        <input type="hidden" id="al-option-of" value="">
+        <input type="hidden" id="al-option-idx" value="">
         <label>Name<input type="text" id="al-name" required></label>
-        <label>Day<select id="al-day"></select></label>
-        <label>Category<select id="al-cat"></select></label>
+        <label class="al-slot-field">Day<select id="al-day"></select></label>
+        <label class="al-slot-field">Category<select id="al-cat"></select></label>
         <label>Duration (minutes)<input type="number" id="al-dur" value="60" min="5" step="5" required></label>
-        <label>Fixed start time (optional — flight landing, train departure, timed entry)<input type="time" id="al-fixed"></label>
+        <label class="al-slot-field">Fixed start time (optional — flight landing, train departure, timed entry)<input type="time" id="al-fixed"></label>
         <label>Address or coordinates<input type="text" id="al-where" placeholder="Search an address, or paste 41.9101, 12.4983"></label>
         <p class="al-coords-status" id="al-coords-status">No coordinates yet — pick a search suggestion above, or <button type="button" class="linklike" id="al-coords-toggle">enter them manually</button>.</p>
         <div id="al-coords-wrap" class="hidden">

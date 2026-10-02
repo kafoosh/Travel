@@ -28,11 +28,36 @@ export const PROMPT_PREFS = [
   { key:'transport', type:'choice', label:'Getting around', options:['Any','Mostly walking','Public transport','Cycling','Car'], def:'Any' },
   { key:'startTime', type:'choice', label:'Mornings', options:['Early riser','Normal','Slow starts'], def:'Normal' },
   { key:'interests', type:'multi', label:'Interests', options:['History','Art & museums','Food & drink','Nightlife','Nature & hiking','Architecture','Shopping','Local markets','Beaches','Photography','Off the beaten path','Kid-friendly'] },
-  { key:'food', type:'multi', label:'Food', options:['Restaurant picks each day','Street food','Vegetarian','Vegan','Halal','Gluten-free','One splurge meal'] },
+  { key:'food', type:'multi', label:'Food', options:['Restaurant picks each day','Several options per meal','Street food','Vegetarian','Vegan','Halal','Gluten-free','One splurge meal'] },
   { key:'accessibility', type:'multi', label:'Access needs', options:['Step-free','Limited walking','Stroller-friendly'] },
   { key:'avoid', type:'text', label:'Avoid', placeholder:'e.g. crowds, long queues, early flights' },
   { key:'extras', type:'text', label:'Anything else', placeholder:'e.g. must see the Benfica match on the 12th' },
 ];
+
+/* The Food choice that asks for meal options — the one case where the
+   assistant should send more than one place per meal. */
+const MEAL_OPTIONS_PREF = 'Several options per meal';
+
+/* Meal options: a food stop can carry other places for the same slot, which
+   the planner shows as a swipeable carousel. Spelled out in every prompt, but
+   only ever ON REQUEST — a plan with three restaurants per meal is a plan
+   the traveller has to finish themselves. */
+function mealOptionsSpec(){
+  return `MEAL OPTIONS
+============
+A food stop can carry OTHER PLACES for the same meal, which my planner shows as a carousel I browse and pin one from. Only add these when I explicitly ask for options, choices or alternatives (for a meal, a day, or the whole trip). Otherwise give exactly ONE place per meal and no "####" blocks at all.
+
+When I do ask, the "###" stop is your first pick (it is the one scheduled and mapped), and each alternative follows its fields as its own block:
+
+#### Option: <another place for the same meal>
+- lat: <decimal latitude — REQUIRED>
+- lng: <decimal longitude — REQUIRED>
+- duration: <only if different from the stop's>
+- image: <photo URL, same PHOTOS rules>
+- description: <1–2 sentences: what it is, price level, why pick it over the others>
+
+Keep the options genuinely different (cuisine, price, vibe) and all near where the day is at that time. Only food stops take options.`;
+}
 
 /* Turn collected preference values into prompt lines. `days` is handled
    separately: in a new plan it drives the "Number of days" line, so it would
@@ -55,7 +80,11 @@ function prefLines(prefs, trip, mode){
   if(val('startTime')) add('Mornings', val('startTime') === 'Early riser' ? 'happy to start by 08:00' : val('startTime') === 'Slow starts' ? 'prefer starting around 10:00–10:30' : 'normal ~09:00 starts');
   const arr = k => Array.isArray(val(k)) ? val(k) : [];
   if(arr('interests').length) add('Interests', arr('interests').join(', '));
-  if(arr('food').length) add('Food', arr('food').join(', '));
+  const food = arr('food').filter(f => f !== MEAL_OPTIONS_PREF);
+  if(food.length) add('Food', food.join(', '));
+  if(arr('food').includes(MEAL_OPTIONS_PREF)){
+    add('Meal options', 'YES — give every meal 2–3 places to choose from: the "###" food stop is your first pick, the others go under it as "#### Option:" blocks (see MEAL OPTIONS)');
+  }
   if(arr('accessibility').length) add('Accessibility', arr('accessibility').join(', ') + ' — respect this when choosing stops and routes');
   add('Please avoid', val('avoid'));
   add('Also', val('extras'));
@@ -214,6 +243,21 @@ Put the whole change list in a single fenced code block (triple backticks) so th
 - subtitle: …
 - start date: <YYYY-MM-DD>
 
+## Add Options to {s12}
+### <another place for the same meal>
+- lat: …
+- lng: …
+- description: …
+(Food stops only, and only when I ask for options — see MEAL OPTIONS below. Each "###" block is one more place for that meal; the stop's chosen place stays chosen.)
+
+## Edit Option {s12}: <option name>
+<only the lines that change>
+
+## Choose Option {s12}: <option name>
+(Makes that option the scheduled one and moves it to the front.)
+
+## Remove Option {s12}: <option name>
+
 ## Add to Checklist
 - [ ] <item>
 
@@ -235,6 +279,7 @@ RULES
 - A moving stop — a hike, a train, a flight, a ferry (category hike | travel | flight | boat) — has its lat/lng at the DEPARTURE point and "- end lat:" / "- end lng:" where it ARRIVES; give both ends to any within-trip train/flight/ferry you add.
 - New locations need real lat/lng coordinates (they drive the map and travel times), realistic durations, and an "- image:" line wherever you can source a real photo (see PHOTOS below). Travel between stops is computed automatically — durations are visit time only.
 - Keep each "- key: value" on a single line.
+- A "#### Option:" block under a food stop is another place for that meal — I swipe between them. "## Edit {s12}" edits the place currently chosen (the "###" one). Leave the options alone unless I ask, and give a meal new options only when I ask for choices (see MEAL OPTIONS).
 - Keep Trip Info in step with your changes: "## Add to Info: Closures" / "Reservations" for stops you add that close weekly or need booking.
 - If what I ask for reshapes most of the trip, say so and send the complete trip document instead, in the same format as below but without the {references} — my planner accepts either.
 - If I ask for more changes afterwards, send a NEW change list with only those changes, written as if your earlier list has been applied. A stop you added earlier has no reference yet: point at it with its exact name in braces, e.g. {Gelateria del Teatro}.
@@ -244,6 +289,8 @@ TRIP INFO
 ${infoStatus(trip.info)}
 
 ${imageSpec()}
+
+${mealOptionsSpec()}
 
 CURRENT TRIP DOCUMENT
 =====================
@@ -261,6 +308,7 @@ RULES
 - Put the whole document inside a single fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste — they are load-bearing. Write nothing after the block. (If I ask for a file, save the same content as .md or .txt.)
 - Keep every field of unchanged locations EXACTLY as they are — same names, coordinates, durations, descriptions, details, images, notes, and tags. My notes are mine: never edit or drop a "- notes:" line, and a "- done: yes" line is a stop I have already visited — keep it, and don't rearrange or drop those stops unless I ask. A "- hidden: yes" line means I have taken that stop's pin off the map; keep the line, and keep the stop.
 - Keep every day's "- hide start:" / "- hide end:" line if it has one — that end of the day is one I have taken off the map. Keep a "- pinned: yes" line on the same day it is on (it is the day the planner opens to); never add a second one.
+- Keep every "#### Option:" block under a food stop exactly as it is, and the stop's "- shown option:" line if it has one — they are the places I'm choosing between for that meal (see MEAL OPTIONS). Add options to a meal only when I ask for choices.
 - Keep every day's "- color:" line exactly as it is unless I ask to change it (valid values: rust, gold, olive, forest, teal, sea, plum, wine — it colour-codes that day in the planner).
 - Each day says where it starts and ends. "- hotel: X" means the day starts AND ends at hotel X ("none" = no hotel). A day may instead carry a "- start hotel:" / "- end hotel:" pair when its two ends differ: an arrival day has "start hotel: none", a departure day has "end hotel: none", and a hotel-change day starts at the old hotel and ends at the new one — the end hotel is where that night is spent. Keep these lines matching where the traveller actually wakes up and sleeps, and update them whenever you add, remove or reorder days, or change hotels.
 - A moving stop — a hike, a train, a flight, a ferry (category hike | travel | flight | boat) — may carry "- end lat:" / "- end lng:" lines: its lat/lng is the DEPARTURE point (trailhead, departure station or airport) and the end coordinates are where it ARRIVES; the commute to the departure point is computed like any leg, "duration" is the leg itself, and the day continues from the arrival. Keep both ends exactly as they are when moving such stops between days, and give both ends to any within-trip train/flight/ferry you add — never place one only at its arrival point.
@@ -284,6 +332,8 @@ ${infoSpec()}
 ${infoStatus(trip.info)}
 
 ${imageSpec()}
+
+${mealOptionsSpec()}
 
 CURRENT TRIP DOCUMENT
 =====================
@@ -355,7 +405,7 @@ The planner then computes the commute TO the departure point like any other leg 
 
 Arrival/departure/transfer days: model the flight or train as its own stop as described above, with "fixed start" as its departure (or landing) time. Give such days the "start hotel" / "end hotel" pair rather than a single "hotel:" line.
 
-(Repeat "## Day N: …" for every day. Include meals as category "food" stops with real restaurant recommendations. 4–8 stops per day is a realistic pace; do not overpack. Order each day's stops geographically so the day flows without backtracking.)
+(Repeat "## Day N: …" for every day. Include meals as category "food" stops with real restaurant recommendations — one place per meal unless I ask for options (see MEAL OPTIONS). 4–8 stops per day is a realistic pace; do not overpack. Order each day's stops geographically so the day flows without backtracking.)
 
 ## Unassigned
 
@@ -380,6 +430,8 @@ Arrival/departure/transfer days: model the flight or train as its own stop as de
 ${infoSpec()}
 
 ${imageSpec()}
+
+${mealOptionsSpec()}
 
 RULES
 =====
