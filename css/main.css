@@ -2477,3 +2477,70 @@ button.stop-number{ border:none; padding:0; cursor:default; pointer-events:none;
   .sheet-panel .slot-opt.current{ background:var(--accent-tint); color:var(--accent-dark); font-weight:600; cursor:default; }
   .sheet-panel .slot-opt:disabled{ opacity:1; }
 }
+
+/* =========================================================
+   MEAL OPTIONS
+   A food stop with several candidate places shows them as a
+   horizontal scroll-snap strip inside its card: the place in
+   view fills the card, the next one peeks in at the right edge
+   to say there's more. Settling on a place chooses it (see
+   wireOptionCarousel). The slot's own controls — move, tick,
+   eye, bin — sit under the strip and act on the whole slot.
+   ========================================================= */
+.stop-card.has-options .stop-main{ min-width:0; }
+.opt-viewport{
+  position:relative;            /* slides' offsetLeft is measured from here */
+  display:flex;
+  gap:10px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scroll-snap-type:x mandatory;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+}
+.opt-viewport::-webkit-scrollbar{ display:none; }
+.opt-slide{
+  flex:0 0 calc(100% - 36px);
+  min-width:0;
+  display:flex;
+  gap:12px;
+  scroll-snap-align:start;
+  transition:opacity .18s;
+}
+.opt-slide:not(.shown){ opacity:.45; cursor:pointer; }
+.opt-face{ flex:1; min-width:0; }
+.opt-nav{
+  display:flex; align-items:center; gap:8px;
+  margin-top:6px;
+  font-family:'IBM Plex Mono', monospace;
+  font-size:11px;
+  color:var(--ink-soft);
+}
+.opt-dots{ display:inline-flex; gap:5px; }
+.opt-dot{ width:6px; height:6px; border-radius:50%; background:var(--line); transition:background .18s; }
+.opt-dot.on{ background:var(--accent); }
+.opt-arrow{
+  font-size:15px; line-height:1;
+  width:28px; height:24px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:var(--card);
+  color:var(--ink-soft);
+  cursor:pointer;
+}
+.opt-arrow:hover{ background:var(--accent-tint); border-color:var(--accent); }
+@media (max-width: 860px){
+  .opt-slide{ gap:10px; flex-basis:calc(100% - 30px); }
+  .opt-arrow{ width:36px; height:32px; }
+}
+
+.modal-options{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:-4px 0 12px; }
+.modal-options:empty{ display:none; }
+.mo-switch{
+  display:inline-flex; align-items:center; gap:6px;
+  font-family:'IBM Plex Mono', monospace; font-size:12px; color:var(--ink-soft);
+}
+.mo-arrow{ padding:4px 10px; font-size:14px; line-height:1; }
+.mo-arrow:disabled{ opacity:.35; cursor:default; }
+.mo-add, .mo-remove{ padding:5px 10px; font-size:11.5px; }

@@ -156,6 +156,45 @@ check('reorder', JSON.stringify(rev.days.find(d => d.title === base.days[1].titl
 check('move day', rev.days[2].title === base.days[0].title && rev.days[0].title === base.days[1].title);
 check('name in braces works as a ref', rev.stops[colo.id].dur === 99);
 
+/* --- meal options --- */
+console.log('meal options:');
+{
+  const { optionsOf } = await import('../js/format.js');
+  const food = Object.values(base.stops).find(s => s.cat === 'food');
+  const r = applyPatch(base, parsePatch(`# Trip Changes
+## Add Options to {${food.id}}
+### Trattoria Uno
+- lat: 41.9
+- lng: 12.47
+- description: Cheap and cheerful.
+### Trattoria Due
+- lat: 41.91
+- lng: 12.48
+## Edit Option {${food.id}}: Trattoria Uno
+- duration: 45
+## Choose Option {${food.id}}: Trattoria Due
+## Remove Option {${food.id}}: {Trattoria Uno}
+## Add to Day 3 at end
+### Dinner — Uno
+- lat: 41.9
+- lng: 12.5
+- category: food
+#### Option: Dinner — Due
+- lat: 41.8
+- lng: 12.5
+`).ops);
+  const f2 = r.trip.stops[food.id];
+  check('options added, edited, chosen, removed', f2.name === 'Trattoria Due'
+    && JSON.stringify(optionsOf(f2).map(o => o.name)) === JSON.stringify([food.name, 'Trattoria Due']), r.warnings.join('; '));
+  check('the slot keeps its day', dayOfId(r.trip, food.id) === dayOfId(base, food.id));
+  const dinner = byName(r.trip, 'Dinner — Uno');
+  check('a new stop can arrive with options', dinner && dinner.alts && dinner.alts[0].name === 'Dinner — Due');
+  check('option ops are tallied', r.summary.includes('2 options added') && r.summary.includes('1 option chosen'));
+  check('the live trip is untouched', !base.stops[food.id].alts);
+  const bad = applyPatch(base, parsePatch(`# Trip Changes\n## Choose Option {${food.id}}: Nowhere\n## Edit {${food.id}}\n- duration: 61`).ops);
+  check('an unknown option warns, the rest applies', bad.warnings.length === 1 && bad.trip.stops[food.id].dur === 61);
+}
+
 /* --- nothing applicable --- */
 let threw = false;
 try{ applyPatch(base, parsePatch('# Trip Changes\n## Remove {zzz}').ops); } catch(e){ threw = true; }

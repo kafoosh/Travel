@@ -61,6 +61,67 @@ trip.days[0].order.push(hikeId);
 const t2 = parseTrip(serializeTrip(trip)).trip;
 const c2 = Object.values(t2.stops).find(s => s.name === 'Colosseum');
 check('multi-line notes survive', c2.notes === colosseum.notes);
+
+/* --- meal options --- */
+{
+  const { optionsOf, chooseOption, addOption, removeOption } = await import('../js/format.js');
+  const optMd = `# Trip: Options
+
+## Day 1: Lunch day
+- start: 09:00
+- hotel: none
+
+### Lunch — Alpha
+- lat: 45.1
+- lng: 12.1
+- category: food
+- duration: 60
+- shown option: 2
+
+#### Option: Lunch — Beta
+- lat: 45.2
+- lng: 12.2
+- description: The other one.
+- notes: Book ahead.
+
+#### Option: Lunch — Gamma
+- lat: 45.3
+- lng: 12.3
+- duration: 40
+
+### Museum
+- lat: 45
+- lng: 12
+`;
+  const ot = parseTrip(optMd).trip;
+  const lunch = ot.stops.s1;
+  check('options parse under their stop', lunch.alts && lunch.alts.length === 2 && ot.days[0].order.length === 2);
+  check('shown option sets the carousel position', JSON.stringify(optionsOf(lunch).map(o => o.name)) === JSON.stringify(['Lunch — Beta', 'Lunch — Alpha', 'Lunch — Gamma']));
+  check('an option inherits the slot duration unless it says otherwise', lunch.alts[0].dur === 60 && lunch.alts[1].dur === 40);
+  check('options round-trip as a fixed point', JSON.stringify(parseTrip(serializeTrip(ot)).trip) === JSON.stringify(ot));
+  check('a stop without options carries no option fields', !('alts' in ot.stops.s2) && !('altPos' in ot.stops.s2));
+  const stripped = serializeTrip(ot).replace(/^#+ /mg, '').replace(/^- /mg, '');
+  check('options survive stripped markdown markers', JSON.stringify(parseTrip(stripped).trip.stops.s1.alts) === JSON.stringify(lunch.alts));
+
+  const sw = JSON.parse(JSON.stringify(lunch));
+  chooseOption(sw, 2);
+  check('choosing an option swaps its place in, order kept', sw.name === 'Lunch — Gamma' && sw.lat === 45.3 && sw.dur === 40
+    && JSON.stringify(optionsOf(sw).map(o => o.name)) === JSON.stringify(['Lunch — Beta', 'Lunch — Alpha', 'Lunch — Gamma']));
+  check('slot fields stay with the slot', sw.id === 's1' && sw.cat === 'food');
+  chooseOption(sw, 0);
+  check('a chosen option brings its own notes', sw.notes === 'Book ahead.' && sw.desc === 'The other one.');
+  addOption(sw, { name: 'Lunch — Delta', lat: 1, lng: 2 });
+  check('added option goes last, chosen stays chosen', sw.name === 'Lunch — Beta' && optionsOf(sw).at(-1).name === 'Lunch — Delta' && optionsOf(sw).at(-1).dur === sw.dur);
+  removeOption(sw, 0);
+  check('removing the chosen option chooses its neighbour', sw.name === 'Lunch — Alpha' && optionsOf(sw).length === 3);
+  removeOption(sw, 1); removeOption(sw, 1);
+  check('the last option standing is a plain stop again', sw.name === 'Lunch — Alpha' && !('alts' in sw) && !('altPos' in sw));
+  check('normalize drops junk options', (() => {
+    const n = normalizeTrip({ ...ot, stops: { ...ot.stops, s1: { ...lunch, alts: [null, { name: '' }, { name: 'Ok', lat: 1 }], altPos: 9 } } });
+    const s = n.stops.s1;
+    return s.alts.length === 1 && s.altPos === 1 && s.alts[0].lat === null && s.alts[0].dur === s.dur && Array.isArray(s.alts[0].tags);
+  })());
+}
 check('fixed start survives', c2.fixedStart === '09:20');
 check('split start/end hotels survive', t2.days[0].startHotelId === 'h2' && t2.days[0].endHotelId === 'h1');
 check('day colour survives', t2.days[0].color === 'teal');

@@ -35,6 +35,77 @@ export const DEFAULT_DUR = {
   shop:60, hike:150, hotel:20, flight:90, travel:120, boat:30, other:45
 };
 
+/* Meal options. A food stop can hold several candidate places for the same
+   slot — the planner shows them as a carousel and the traveller swipes to
+   pick. The stop's own fields are always the CHOSEN place (so the schedule,
+   the map, routing and every exporter keep reading a plain stop); the others
+   wait in `alts`, and `altPos` is where the chosen one sits in the carousel,
+   so swiping never reshuffles the order. Everything else — the slot's day,
+   fixed start, done tick, hidden flag — belongs to the slot, not the place.
+   Both fields exist only on a stop that has options. */
+export const OPTION_FIELDS = ['name','lat','lng','img','desc','detail','notes','tags','dur'];
+
+function optionFrom(src){
+  return { name: src.name || '', lat: src.lat ?? null, lng: src.lng ?? null,
+    img: src.img || '', desc: src.desc || '', detail: src.detail || '', notes: src.notes || '',
+    tags: Array.isArray(src.tags) ? [...src.tags] : [], dur: src.dur ?? null };
+}
+
+/* The stop's places in carousel order, the chosen one included. */
+export function optionsOf(stop){
+  const alts = Array.isArray(stop.alts) ? stop.alts : [];
+  const pos = Math.min(Math.max(0, stop.altPos | 0), alts.length);
+  return [...alts.slice(0, pos), optionFrom(stop), ...alts.slice(pos)];
+}
+export function chosenOptionIndex(stop){
+  return Math.min(Math.max(0, stop.altPos | 0), (stop.alts || []).length);
+}
+
+function setOptions(stop, opts, pick){
+  Object.assign(stop, optionFrom(opts[pick]));
+  if(stop.dur == null) stop.dur = DEFAULT_DUR[stop.cat] ?? 45;
+  const rest = opts.filter((_, i) => i !== pick);
+  if(rest.length){ stop.alts = rest; stop.altPos = pick; }
+  else { delete stop.alts; delete stop.altPos; }
+}
+
+/* Make carousel slot `i` the chosen place. Returns whether anything changed. */
+export function chooseOption(stop, i){
+  const opts = optionsOf(stop);
+  if(i < 0 || i >= opts.length || i === chosenOptionIndex(stop)) return false;
+  setOptions(stop, opts, i);
+  return true;
+}
+
+/* Add a place to the end of the carousel (the chosen one stays chosen). */
+export function addOption(stop, fields){
+  const o = optionFrom(fields);
+  if(o.dur == null) o.dur = stop.dur;
+  stop.alts = [...(stop.alts || []), o];
+  stop.altPos = chosenOptionIndex(stop);
+}
+
+/* Drop carousel slot `i`. Removing the chosen place chooses its neighbour. */
+export function removeOption(stop, i){
+  const opts = optionsOf(stop);
+  if(opts.length < 2 || i < 0 || i >= opts.length) return false;
+  const pos = chosenOptionIndex(stop);
+  opts.splice(i, 1);
+  setOptions(stop, opts, i === pos ? Math.min(i, opts.length - 1) : (i < pos ? pos - 1 : pos));
+  return true;
+}
+
+/* Carousel slot whose name matches (exactly, then by containment). */
+export function findOption(stop, name){
+  const n = String(name || '').trim().toLowerCase();
+  if(!n) return -1;
+  const opts = optionsOf(stop);
+  const exact = opts.findIndex(o => o.name.toLowerCase() === n);
+  if(exact !== -1) return exact;
+  const part = opts.map((o, i) => o.name.toLowerCase().includes(n) ? i : -1).filter(i => i !== -1);
+  return part.length === 1 ? part[0] : -1;
+}
+
 export const THEMES = ['parchment','lagoon','terracotta','midnight','field-notes'];
 
 /* Day colour palette: named accents a day can adopt so different cities or
@@ -126,6 +197,24 @@ function stopLines(s){
   if(s.detail) out.push('- detail: ' + encVal(s.detail));
   if(s.notes) out.push('- notes: ' + encVal(s.notes));
   if(s.tags && s.tags.length) out.push('- tags: ' + s.tags.map(encVal).join(', '));
+  // Meal options: the "###" place is the chosen one; the others follow as
+  // "#### Option:" blocks in carousel order. "shown option" says where the
+  // chosen place sits among them — written only when it isn't first.
+  const alts = Array.isArray(s.alts) ? s.alts : [];
+  if(alts.length){
+    const pos = chosenOptionIndex(s);
+    if(pos) out.push('- shown option: ' + (pos + 1));
+    alts.forEach(o => {
+      out.push('', '#### Option: ' + o.name);
+      if(o.lat != null && o.lng != null){ out.push('- lat: ' + o.lat); out.push('- lng: ' + o.lng); }
+      if(o.dur != null && o.dur !== s.dur) out.push('- duration: ' + o.dur);
+      if(o.img) out.push('- image: ' + encVal(o.img));
+      if(o.desc) out.push('- description: ' + encVal(o.desc));
+      if(o.detail) out.push('- detail: ' + encVal(o.detail));
+      if(o.notes) out.push('- notes: ' + encVal(o.notes));
+      if(o.tags && o.tags.length) out.push('- tags: ' + o.tags.map(encVal).join(', '));
+    });
+  }
   return out;
 }
 
@@ -270,6 +359,8 @@ const KEY_ALIASES = {
   'hide start':'hideStart', 'hide end':'hideEnd',
   pinned:'pinned', pin:'pinned',
   tags:'tags',
+  'shown option':'optShown', 'option shown':'optShown', 'chosen option':'optShown',
+  'active option':'optShown', 'selected option':'optShown',
   'suggested day':'sday', 'recommended day':'sday',
   'suggestion note':'snote', 'recommended note':'snote', 'suggestion':'snote',
   group:'group', 'group name':'group', 'unassigned group':'group',
@@ -333,6 +424,16 @@ function normCat(v){
   return map[c] || 'other';
 }
 
+/* "#### Option: <place>" — the heading of a meal option under a stop. The
+   "Option:" word is what marks it; an LLM may write "Alternative:" instead. */
+const OPTION_HEAD = /^(?:option|alternative|alt)\s*(?:\d+\s*)?[:—–-]\s*\S/i;
+export function optionHeading(line){
+  const m = /^####\s+(.+)$/.exec(line);
+  if(!m) return null;
+  const name = splitRef(m[1].replace(/^(?:option|alternative|alt)\s*(?:\d+\s*)?[:—–-]\s*/i, '')).name;
+  return name || null;
+}
+
 /* Recover markdown structure from text whose "#"/"##"/"###"/"- " markers were
    stripped — e.g. copied out of a chat UI that rendered the markdown. Only
    kicks in when NO heading markers survive but the shape is recognisable
@@ -341,7 +442,7 @@ function normCat(v){
 function recoverStructure(text){
   const lines = text.split(/\r?\n/);
   if(lines.some(l => /^#{1,3}\s/.test(l))) return text;   // markers intact — leave it
-  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|hide start|hide end|pinned|pin|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|theme|colou?r|day colou?r)\s*:/i;
+  const KEYS = /^(subtitle|days|start date|start hotel|end hotel|hide start|hide end|pinned|pin|lat|lng|lon|latitude|longitude|end lat|end lng|category|type|duration|minutes|fixed start|arrive by|return by|image|photo|description|desc|detail|details|notes|note|done|hidden|tags|transport|mode|start|hotel|hotel bookend|suggested day|suggestion note|shown option|theme|colou?r|day colou?r)\s*:/i;
   const TOP = /^(hotels?|optional|unassigned|bin|checklist|to-?dos?|trip\s*info)\s*$/i;
   const INFOSUB = /^(weather|closures|reservations?|events?|notes|general)\s*$/i;
   const out = [];
@@ -357,6 +458,8 @@ function recoverStructure(text){
     // Once inside Trip Info, its subsection titles are ### and their prose is free text.
     if(inInfo && INFOSUB.test(line)){ out.push('### ' + line); continue; }
     if(KEYS.test(line)){ out.push('- ' + line); continue; }
+    // A meal option under a stop: "Option: <place>" that lost its "####".
+    if(started && !inInfo && OPTION_HEAD.test(line)){ out.push('#### ' + line); continue; }
     // A bare line immediately followed by a key:value line is a heading (hotel
     // or stop name) that lost its "###". Inside Trip Info everything is prose.
     if(started && !inInfo && KEYS.test(next)){ out.push('### ' + line); continue; }
@@ -378,6 +481,7 @@ export function applyStopKv(cur, meta, key, value){
   else if(key === 'done') cur.done = isYes(value);
   else if(key === 'hidden') cur.hidden = isYes(value);
   else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
+  else if(key === 'optShown'){ const n = parseInt(value, 10); if(!isNaN(n)) cur.optShown = n; }
   else if(key === 'sday' && meta){ const n = parseInt(value, 10); if(!isNaN(n)) meta.day = n; }
   else if(key === 'snote' && meta) meta.note = decVal(value);
   else if(key === 'group'){ if(meta && value.trim()) meta.group = decVal(value.trim()); }
@@ -386,7 +490,7 @@ export function applyStopKv(cur, meta, key, value){
 
 /* A finished stop record from the fields a block supplied. */
 export function buildStop(id, cur){
-  return { id, name:cur.name, cat:cur.cat || 'other',
+  const stop = { id, name:cur.name, cat:cur.cat || 'other',
     dur: cur.dur ?? DEFAULT_DUR[cur.cat || 'other'] ?? 45,
     lat: cur.lat ?? null, lng: cur.lng ?? null,
     endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
@@ -396,6 +500,30 @@ export function buildStop(id, cur){
     hidden: !!cur.hidden,
     img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
     notes: cur.notes || '', tags: cur.tags || [] };
+  const alts = (cur.__alts || []).filter(a => a.name).map(a => {
+    const o = optionFrom(a);
+    if(o.dur == null) o.dur = stop.dur;
+    return o;
+  });
+  if(alts.length){
+    stop.alts = alts;
+    stop.altPos = Math.min(Math.max(0, (cur.optShown || 1) - 1), alts.length);
+  }
+  return stop;
+}
+
+/* A stop block's "- key: value" lines (and any "#### Option:" blocks inside
+   it) onto a half-built record — for the change-list importer, which reads
+   blocks after the fact rather than line by line like parseTrip. */
+export function readStopLines(cur, meta, lines){
+  let alt = null;
+  lines.forEach(l => {
+    const on = optionHeading(l);
+    if(on){ alt = { name: on }; (cur.__alts = cur.__alts || []).push(alt); return; }
+    const p = kvLine(l);
+    if(p) applyStopKv(alt || cur, alt ? null : meta, p.key, p.value);
+  });
+  return cur;
 }
 
 /* Parse the markdown trip format. Returns {trip, warnings}. Throws only when
@@ -413,6 +541,7 @@ export function parseTrip(text){
 
   let section = null;          // 'hotels' | day object | 'optional' | 'bin' | 'info'
   let cur = null;              // current stop/hotel being filled
+  let curAlt = null;           // the "#### Option:" block being filled, inside cur
   let curOptMeta = null;       // {day, note} for the current optional stop
   let infoKey = null, infoBuf = [];
   let stopSeq = 0, hotelSeq = 0, metaDays = null;
@@ -438,7 +567,7 @@ export function parseTrip(text){
       else if(cur.__kind === 'optional') trip.optional.push({ id, day: curOptMeta.day || null, note: curOptMeta.note || '', group: curOptMeta.group || null });
       else if(cur.__kind === 'bin') trip.bin.push(id);
     }
-    cur = null; curOptMeta = null;
+    cur = null; curOptMeta = null; curAlt = null;
   };
 
   for(const rawLine of String(text).split(/\r?\n/)){
@@ -487,6 +616,17 @@ export function parseTrip(text){
       continue;
     }
 
+    // A meal option under the current stop. Inside Trip Info a "####" line
+    // is just prose, so that section keeps it as text (below).
+    if(section !== 'info' && /^####\s/.test(line)){
+      const on = optionHeading(line);
+      if(on && cur && cur.__kind !== 'hotel'){
+        curAlt = { name: on };
+        (cur.__alts = cur.__alts || []).push(curAlt);
+      }
+      continue;
+    }
+
     const h3 = /^###\s+(.+)$/.exec(line);
     if(h3){
       finishStop();
@@ -514,7 +654,9 @@ export function parseTrip(text){
     const kv = kvLine(line);
     if(kv){
       const { key, value } = kv;
-      if(cur){
+      if(curAlt){
+        applyStopKv(curAlt, null, key, value);
+      } else if(cur){
         applyStopKv(cur, curOptMeta, key, value);
       } else if(section && typeof section === 'object'){
         // day-level metadata; hotel names are held raw and resolved after the

@@ -163,6 +163,18 @@ export function normalizeTrip(t){
     s.done = !!s.done;
     s.hidden = !!s.hidden;
     if(!['walk','cycle','transit','taxi','boat'].includes(s.arriveBy)) s.arriveBy = null;
+    // Meal options (see optionsOf in format.js): both fields or neither.
+    const alts = Array.isArray(s.alts) ? s.alts.filter(o => o && typeof o.name === 'string' && o.name.trim()) : [];
+    if(alts.length){
+      alts.forEach(o => {
+        if(!Array.isArray(o.tags)) o.tags = [];
+        ['img','desc','detail','notes'].forEach(k => { if(typeof o[k] !== 'string') o[k] = ''; });
+        if(o.lat == null || o.lng == null){ o.lat = null; o.lng = null; }
+        if(!Number.isFinite(o.dur)) o.dur = s.dur;
+      });
+      s.alts = alts;
+      s.altPos = Math.min(Math.max(0, Number.isInteger(s.altPos) ? s.altPos : 0), alts.length);
+    } else { delete s.alts; delete s.altPos; }
   });
   return trip;
 }

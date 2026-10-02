@@ -107,7 +107,8 @@ function tripDateRange(trip){
 
 /* Everything a stop can be found by: one lowercased haystack per card. */
 function searchText(stop, dayLabel){
-  return [stop.name, stop.desc, stop.detail, stop.notes, (stop.tags || []).join(' '), dayLabel]
+  return [stop.name, stop.desc, stop.detail, stop.notes, (stop.tags || []).join(' '), dayLabel,
+    ...(stop.alts || []).map(o => o.name + ' ' + o.desc)]
     .filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -296,7 +297,21 @@ function stopCardHtml(stop, opts){
     ${tags ? `<div class="tags">${tags}</div>` : ''}
     ${coordsHtml(stop.lat, stop.lng, stop.name)}
     ${AB_CATS.includes(stop.cat) && stop.endLat != null ? coordsHtml(stop.endLat, stop.endLng, stop.name + (stop.cat === 'hike' ? ' (end)' : ' (arrival)'), 'end') : ''}
+    ${altsHtml(stop)}
   </article>`;
+}
+
+/* A meal's other options — the places the planner swipes between. The file
+   can't re-plan the day, so they're listed as the fallbacks they are. */
+function altsHtml(stop){
+  const alts = stop.alts || [];
+  if(!alts.length) return '';
+  return `<details class="more"><summary>${alts.length === 1 ? '1 other option' : alts.length + ' other options'} for this meal</summary>` +
+    alts.map(o => `<div class="alt"><h4>${esc(o.name)}</h4>` +
+      (o.desc ? `<p class="desc">${esc(o.desc)}</p>` : '') +
+      (o.notes ? `<p class="notes">📝 ${esc(o.notes)}</p>` : '') +
+      coordsHtml(o.lat, o.lng, o.name) + '</div>').join('') +
+    '</details>';
 }
 
 function dayHtml(trip, day, idx, opts){
@@ -536,6 +551,8 @@ svg.map .sc text{fill:var(--ink-soft); font-family:var(--mono); font-size:11px;}
   color:var(--ink-soft); font-size:14px; cursor:pointer;}
 .tick[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff;}
 .desc{margin:9px 0 0; font-size:14.5px;}
+.alt{margin:10px 0 0; padding-top:8px; border-top:1px dashed var(--line, #ccc);}
+.alt h4{margin:0; font-size:15px;}
 .notes{margin:8px 0 0; padding:8px 10px; background:var(--accent-tint); border-radius:8px; font-size:14px; white-space:pre-wrap;}
 .more{margin:8px 0 0; font-size:14px;}
 .more summary{cursor:pointer; color:var(--ink-soft); font-size:13px;}

@@ -23,6 +23,7 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 - **Group the unassigned** — the Unassigned tab files its stops under your own headers ("Rainy day", "North of the river", a maybe-pile…): create, rename, collapse, reorder (drag the ⠿ grip or press ↑/↓ on it), and dissolve without losing anything. Cards drag between groups and reorder inside one; each header's ＋ adds a stop straight into that group — and every card carries a ▤ dropdown that files it under any group, back out to the pool, or into a brand-new group named on the spot, so a long list never needs a long drag. Groups ride along in export/import (`- group:` on the stop), the offline copy, All Stops (as a chip on each row) and shared rooms.
 - **Drags that scroll** — stop cards in Day by Day, All Stops and Unassigned all move with one pointer-drag engine, mouse and touch alike: grab the ⠿ rail, a ghost of the card follows, and holding it near the top or bottom edge keeps the page scrolling (speed scales with how deep you push) so a card can travel the whole length of a long list in one drag. Drop marks show exactly where it will land, Escape cancels, and a card dropped on another day's tab moves to that day. On a phone the day's cards skip the finger drag altogether: tap a card's number and a sheet lists the day's slots — pick one and the stop moves there, the rest shifting to make room.
 - **Hide anything from the map** — an eye next to the tick and the bin on every stop card (and in its detail popup) takes that stop off the map without taking it out of the day; the Start / End hotel chips have the same eye, so a day's bookends can go too. What's hidden leaves the map completely: no pin, no legs either side of it, and no pull on the zoom — which is the point on a transfer day. Hide the four-hour train *and* the hotel you checked out of, and a map stretched across a whole country snaps to the city you actually walk around, with the schedule, the timings and the travel legs all untouched. Numbers never shift: the day reads 1, 2, 3, 4 on the cards and 1, 2, 4 on the map, the hidden card dims and its badge goes hollow, so a gap in the pins always has a card explaining it. The flags live on the stop and the day, so they travel through export/import, the offline copy, the KML (whose route line breaks the same way) and shared rooms — and a hidden point opens unticked, not missing, in the Google Maps picker.
+- **Meal options** — a food stop can hold several places for the same meal. On its card they sit side by side in a carousel, the next one peeking in at the edge: swipe (or tap the peeking place, or use ‹ ›) and the place you land on becomes the chosen one — the schedule, the map and the travel legs follow it, while the slot's time, tick, eye and day stay put. The stop's popup has ＋ Add option, Remove option and the same ‹ › switcher. In the file each extra place is a `#### Option:` block under its stop; the AI prompts describe them but only ask for them when you do (tick **Several options per meal** under *Food* in Tailor the plan, or just ask), and the change-list prompt can add, edit, choose or remove options. The offline copy lists them under the meal.
 - **Notes everywhere** — every location has a free-text notes field (booking refs, must-try dishes…), included in export/import and sync.
 - **Tick stops off as you go** — a ✓ next to the bin on every stop card (and in its detail popup) marks it done: the card fades, its name is struck through, its map pin greys, and the day header counts "✓ 3 of 7 done". Nothing moves — a done stop keeps its place, its time and its number, and the schedule computes exactly as before. Auto-plan is the one thing that reads the tick: a visited stop is pinned to the day you visited it, so replanning mid-trip reshuffles what's ahead, not what's behind. It lives on the stop itself, so it travels through export/import, rides along in the offline copy, and everyone in a shared room sees the same crossed-off plan. One Undo away, like everything else.
 - **Share on demand — and sharing is saving** — an unshared trip lives only in its browser tab (a reload keeps it; a fresh tab at the bare URL always opens a new blank trip). Click "Create a share link" and the trip moves to Cloud Firestore at a stable URL: everyone holding the link edits the same plan, live, and that link is how you come back to it. Requires the one-time Firebase setup below; without it the site still works as a tab-local planner with export/import. Opening a link on a device that hasn't seen that trip before holds the first render behind a quiet "Opening the shared trip…" line rather than painting a blank *Untitled Trip* while Firestore answers — and gives up after a few seconds, so a trip that never arrives leaves a usable planner rather than a spinner.
@@ -88,6 +89,17 @@ One markdown file. The full spec is embedded in the AI prompt (AI Plan → "Plan
 - done: yes                # ticked off on the trip; written only when true
 - hidden: yes              # no pin on the map; written only when true
 
+### Lunch — Roscioli
+- lat: 41.8941
+- lng: 12.4734
+- category: food
+- shown option: 1         # optional: which place in the carousel is the chosen one
+
+#### Option: Lunch — Da Enzo al 29   # another place for the same meal
+- lat: 41.8884
+- lng: 12.4781
+- description: …           # also duration (if different), image, detail, notes, tags
+
 ## Unassigned
 
 ### Centrale Montemartini
@@ -138,6 +150,8 @@ The "Edit this trip — just the changes" prompt embeds the trip with an `{id}` 
 ## Add Day after Day 5: Tivoli     # its stops go inside, as ### blocks
 ## Move Day 6 after Day 2
 ## Remove Day 7
+## Add Options to {s14}           # "###" blocks, each another place for that meal
+## Choose Option {s14}: Da Enzo   # or Edit Option / Remove Option {s14}: <place>
 ## Add Hotel / Edit {h1} / Edit Trip / Add to Unassigned / Add to Checklist / Edit {k3}
 ## Replace Info: Weather           # or "Add to Info: Closures" to append
 ```

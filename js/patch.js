@@ -27,7 +27,8 @@
    ========================================================= */
 
 import { kvLine, applyStopKv, buildStop, splitRef, isYes, decVal, newDay,
-         INFO_KEYS, DAY_COLORS, THEMES } from './format.js';
+         readStopLines, optionHeading, optionsOf, chooseOption, addOption, removeOption,
+         findOption, chosenOptionIndex, OPTION_FIELDS, INFO_KEYS, DAY_COLORS, THEMES } from './format.js';
 
 const FENCE = /```[a-zA-Z]*\n([\s\S]*?)```/;
 const MODES = ['walk','cycle','transit','taxi','boat'];
@@ -177,8 +178,8 @@ export function applyPatch(liveTrip, ops){
   /* "### " blocks → new stop ids (already in trip.stops), with their
      unassigned-only fields alongside. */
   const makeStops = (op, blocks) => blocks.map(b => {
-    const cur = { name: b.name }, meta = {};
-    b.lines.forEach(l => { const p = kvLine(l); if(p) applyStopKv(cur, meta, p.key, p.value); });
+    const meta = {};
+    const cur = readStopLines({ name: b.name }, meta, b.lines);
     if(cur.lat == null || cur.lng == null) warn(op, '"' + b.name + '" has no coordinates — it will not appear on the map.');
     const id = newStopId();
     trip.stops[id] = buildStop(id, cur);
@@ -209,8 +210,80 @@ export function applyPatch(liveTrip, ops){
     });
   };
 
+  /* --- meal options --- */
+  // "## <verb> Option {s12}: <place>" — the stop is the first {ref}; the place
+  // is the text after the colon, or a second {ref} holding its name.
+  const optionTarget = (op, rest) => {
+    const refs = refsIn(rest);
+    const id = refs.length ? findStop(refs[0]) : null;
+    if(!id){ warn(op, refs.length ? 'no stop {' + refs[0] + '}.' : 'no {ref} for the stop.'); return null; }
+    const after = rest.replace(/\{[^{}]*\}/, '');
+    const name = refs[1] || (/[:—–]\s*(.+)$/.exec(after) || [])[1] || '';
+    return { stop: trip.stops[id], name: name.trim() };
+  };
+  const optionAt = (op, t) => {
+    if(!t.name){ warn(op, 'which option? Name it after a colon.'); return -1; }
+    const i = findOption(t.stop, t.name);
+    if(i === -1) warn(op, '"' + t.stop.name + '" has no option called "' + t.name + '".');
+    return i;
+  };
+
   /* --- the operations --- */
   const handlers = [
+    // Add Option(s) to {s12} — "###" or "####" blocks, each one place
+    [/^add\s+(?:an?\s+)?(?:options?|alternatives?)\s+(?:to|for)\s+(.+)$/i, (op, m) => {
+      const t = optionTarget(op, m[1]);
+      if(!t) return;
+      const blocks = [];
+      op.body.forEach(l => {
+        const h = /^###\s+(.+)$/.exec(l);
+        const name = h ? splitRef(h[1]).name : optionHeading(l);
+        if(name){ blocks.push({ name, lines: [] }); return; }
+        if(blocks.length) blocks[blocks.length - 1].lines.push(l);
+      });
+      if(!blocks.length){ warn(op, 'no "### " places under it.'); return; }
+      blocks.forEach(b => {
+        const cur = readStopLines({ name: b.name }, null, b.lines);
+        if(cur.lat == null || cur.lng == null) warn(op, '"' + b.name + '" has no coordinates — it will not appear on the map.');
+        addOption(t.stop, cur);
+        count('option', 'added');
+      });
+    }],
+
+    // Edit / Remove / Choose Option {s12}: <place>
+    [/^(edit|change|update|remove|delete|drop|choose|pick|select|show|use)\s+(?:the\s+)?(?:option|alternative)\s+(.+)$/i, (op, m) => {
+      const t = optionTarget(op, m[2]);
+      if(!t) return;
+      const i = optionAt(op, t);
+      if(i === -1) return;
+      const verb = m[1].toLowerCase();
+      if(/^(remove|delete|drop)$/.test(verb)){
+        if(removeOption(t.stop, i)) count('option', 'removed');
+        else warn(op, 'a stop keeps at least one place — use "## Remove {ref}" to drop the stop.');
+      } else if(/^(edit|change|update)$/.test(verb)){
+        const fields = {};
+        op.body.forEach(l => {
+          const p = kv(l);
+          if(!p) return;
+          if(p.key === 'name' || p.key === 'title'){ if(p.value) fields.name = decVal(p.value); return; }
+          if(p.key === 'tags' && NONE.test(p.value)){ fields.tags = []; return; }
+          applyStopKv(fields, null, p.key, p.value);
+        });
+        const target = i === chosenOptionIndex(t.stop) ? t.stop : optionsOf(t.stop)[i];
+        OPTION_FIELDS.forEach(k => { if(k in fields) target[k] = fields[k]; });
+        if(target !== t.stop){
+          const alts = optionsOf(t.stop);
+          alts[i] = target;
+          t.stop.alts = alts.filter((_, j) => j !== chosenOptionIndex(t.stop));
+        }
+        count('option', 'edited');
+      } else {
+        chooseOption(t.stop, i);
+        count('option', 'chosen');
+      }
+    }],
+
+
     // Edit Trip
     [/^edit\s+(?:the\s+)?trip\b/i, op => {
       op.body.forEach(l => {
