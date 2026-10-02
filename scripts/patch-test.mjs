@@ -185,7 +185,9 @@ console.log('meal options:');
 `).ops);
   const f2 = r.trip.stops[food.id];
   check('options added, edited, chosen, removed', f2.name === 'Trattoria Due'
-    && JSON.stringify(optionsOf(f2).map(o => o.name)) === JSON.stringify([food.name, 'Trattoria Due']), r.warnings.join('; '));
+    && JSON.stringify(optionsOf(f2).map(o => o.name)) === JSON.stringify(['Trattoria Due', food.name]), r.warnings.join('; '));
+  const r2 = applyPatch(r.trip, parsePatch(`# Trip Changes\n## Edit Option {${food.id}}: ${food.name}\n- duration: 35`).ops);
+  check('an unchosen option edits in place', optionsOf(r2.trip.stops[food.id])[1].dur === 35 && r2.trip.stops[food.id].name === 'Trattoria Due');
   check('the slot keeps its day', dayOfId(r.trip, food.id) === dayOfId(base, food.id));
   const dinner = byName(r.trip, 'Dinner — Uno');
   check('a new stop can arrive with options', dinner && dinner.alts && dinner.alts[0].name === 'Dinner — Due');

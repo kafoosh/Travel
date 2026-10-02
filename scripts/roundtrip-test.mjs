@@ -64,7 +64,7 @@ check('multi-line notes survive', c2.notes === colosseum.notes);
 
 /* --- meal options --- */
 {
-  const { optionsOf, chooseOption, addOption, removeOption } = await import('../js/format.js');
+  const { optionsOf, chooseOption, addOption, removeOption, updateOption } = await import('../js/format.js');
   const optMd = `# Trip: Options
 
 ## Day 1: Lunch day
@@ -105,17 +105,23 @@ check('multi-line notes survive', c2.notes === colosseum.notes);
 
   const sw = JSON.parse(JSON.stringify(lunch));
   chooseOption(sw, 2);
-  check('choosing an option swaps its place in, order kept', sw.name === 'Lunch — Gamma' && sw.lat === 45.3 && sw.dur === 40
-    && JSON.stringify(optionsOf(sw).map(o => o.name)) === JSON.stringify(['Lunch — Beta', 'Lunch — Alpha', 'Lunch — Gamma']));
+  check('pinning an option swaps its place in and moves it to the front', sw.name === 'Lunch — Gamma' && sw.lat === 45.3 && sw.dur === 40
+    && sw.altPos === 0 && JSON.stringify(optionsOf(sw).map(o => o.name)) === JSON.stringify(['Lunch — Gamma', 'Lunch — Beta', 'Lunch — Alpha']));
   check('slot fields stay with the slot', sw.id === 's1' && sw.cat === 'food');
-  chooseOption(sw, 0);
+  check('pinning the front option again changes nothing', chooseOption(sw, 0) === false);
+  const shownSecond = JSON.parse(JSON.stringify(lunch));
+  check('pinning a chosen option that sits second moves it to the front', chooseOption(shownSecond, 1) && shownSecond.name === 'Lunch — Alpha'
+    && optionsOf(shownSecond)[0].name === 'Lunch — Alpha' && optionsOf(shownSecond)[1].name === 'Lunch — Beta');
+  chooseOption(sw, 1);
   check('a chosen option brings its own notes', sw.notes === 'Book ahead.' && sw.desc === 'The other one.');
+  updateOption(sw, 2, { notes: 'Cash only', name: 'Lunch — Alpha (old town)' });
+  check('an unchosen option can be edited in place', optionsOf(sw)[2].notes === 'Cash only' && optionsOf(sw)[2].name === 'Lunch — Alpha (old town)' && sw.name === 'Lunch — Beta');
   addOption(sw, { name: 'Lunch — Delta', lat: 1, lng: 2 });
   check('added option goes last, chosen stays chosen', sw.name === 'Lunch — Beta' && optionsOf(sw).at(-1).name === 'Lunch — Delta' && optionsOf(sw).at(-1).dur === sw.dur);
   removeOption(sw, 0);
-  check('removing the chosen option chooses its neighbour', sw.name === 'Lunch — Alpha' && optionsOf(sw).length === 3);
+  check('removing the chosen option chooses its neighbour', sw.name === 'Lunch — Gamma' && optionsOf(sw).length === 3);
   removeOption(sw, 1); removeOption(sw, 1);
-  check('the last option standing is a plain stop again', sw.name === 'Lunch — Alpha' && !('alts' in sw) && !('altPos' in sw));
+  check('the last option standing is a plain stop again', sw.name === 'Lunch — Gamma' && !('alts' in sw) && !('altPos' in sw));
   check('normalize drops junk options', (() => {
     const n = normalizeTrip({ ...ot, stops: { ...ot.stops, s1: { ...lunch, alts: [null, { name: '' }, { name: 'Ok', lat: 1 }], altPos: 9 } } });
     const s = n.stops.s1;

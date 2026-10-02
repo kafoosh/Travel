@@ -28,7 +28,7 @@
 
 import { kvLine, applyStopKv, buildStop, splitRef, isYes, decVal, newDay,
          readStopLines, optionHeading, optionsOf, chooseOption, addOption, removeOption,
-         findOption, chosenOptionIndex, OPTION_FIELDS, INFO_KEYS, DAY_COLORS, THEMES } from './format.js';
+         findOption, updateOption, INFO_KEYS, DAY_COLORS, THEMES } from './format.js';
 
 const FENCE = /```[a-zA-Z]*\n([\s\S]*?)```/;
 const MODES = ['walk','cycle','transit','taxi','boat'];
@@ -269,13 +269,7 @@ export function applyPatch(liveTrip, ops){
           if(p.key === 'tags' && NONE.test(p.value)){ fields.tags = []; return; }
           applyStopKv(fields, null, p.key, p.value);
         });
-        const target = i === chosenOptionIndex(t.stop) ? t.stop : optionsOf(t.stop)[i];
-        OPTION_FIELDS.forEach(k => { if(k in fields) target[k] = fields[k]; });
-        if(target !== t.stop){
-          const alts = optionsOf(t.stop);
-          alts[i] = target;
-          t.stop.alts = alts.filter((_, j) => j !== chosenOptionIndex(t.stop));
-        }
+        updateOption(t.stop, i, fields);
         count('option', 'edited');
       } else {
         chooseOption(t.stop, i);

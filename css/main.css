@@ -308,7 +308,7 @@ html.trip-loading .toplinks{ opacity:.45; pointer-events:none; }
    hidden states still read — but are dimmed and can't be pressed. Anything
    reached another way is caught by the save guard in js/app.js. */
 html.view-only :is(#add-location-btn, #edit-day-btn, #pin-day-btn, #optimize-order, #add-hotel-btn,
-  .done-btn, .hide-btn, .bin-btn, .move-to-day, .mode-opt,
+  .done-btn, .hide-btn, .bin-btn, .move-to-day, .mode-opt, .opt-pin:not(.on),
   #modal-done, #modal-hide, #modal-edit, #modal-bin,
   .check-add, .check-tick, .check-del, .ic-edit, .og-add, .og-rename, .og-del,
   #cloud-create, #cloud-duplicate, #cloud-empty, #cloud-delete, #allow-rearrange){
@@ -2483,8 +2483,8 @@ button.stop-number{ border:none; padding:0; cursor:default; pointer-events:none;
    A food stop with several candidate places shows them as a
    horizontal scroll-snap strip inside its card: the place in
    view fills the card, the next one peeks in at the right edge
-   to say there's more. Settling on a place chooses it (see
-   wireOptionCarousel). The slot's own controls — move, tick,
+   to say there's more. Swiping only browses; the 📌 pins the
+   place in view as the chosen one (see wireOptionCarousel). The slot's own controls — move, tick,
    eye, bin — sit under the strip and act on the whole slot.
    ========================================================= */
 .stop-card.has-options .stop-main{ min-width:0; }
@@ -2530,9 +2530,28 @@ button.stop-number{ border:none; padding:0; cursor:default; pointer-events:none;
   cursor:pointer;
 }
 .opt-arrow:hover{ background:var(--accent-tint); border-color:var(--accent); }
+/* The pin that makes the place in view the chosen one. Quiet on purpose: a
+   greyed-out pin at the end of the nav row (the day pin's idiom), in colour
+   once the place in view is the chosen one. */
+.opt-pin{
+  margin-left:auto;
+  font-size:13px; line-height:1;
+  width:28px; height:24px;
+  padding:0;
+  border:1px solid transparent;
+  border-radius:6px;
+  background:none;
+  cursor:pointer;
+  filter:grayscale(1);
+  opacity:.5;
+}
+.opt-pin:hover{ filter:none; opacity:1; border-color:var(--line); }
+.opt-pin.on{ filter:none; opacity:1; cursor:default; }
+.opt-pin:focus-visible{ outline:2px solid var(--gold); outline-offset:1px; }
 @media (max-width: 860px){
   .opt-slide{ gap:10px; flex-basis:calc(100% - 30px); }
-  .opt-arrow{ width:36px; height:32px; }
+  .opt-arrow, .opt-pin{ width:36px; height:32px; }
+  .opt-pin{ font-size:15px; }
 }
 
 .modal-options{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:-4px 0 12px; }

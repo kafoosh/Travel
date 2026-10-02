@@ -45,7 +45,7 @@ const MEAL_OPTIONS_PREF = 'Several options per meal';
 function mealOptionsSpec(){
   return `MEAL OPTIONS
 ============
-A food stop can carry OTHER PLACES for the same meal, which my planner shows as a carousel I swipe through to pick one. Only add these when I explicitly ask for options, choices or alternatives (for a meal, a day, or the whole trip). Otherwise give exactly ONE place per meal and no "####" blocks at all.
+A food stop can carry OTHER PLACES for the same meal, which my planner shows as a carousel I browse and pin one from. Only add these when I explicitly ask for options, choices or alternatives (for a meal, a day, or the whole trip). Otherwise give exactly ONE place per meal and no "####" blocks at all.
 
 When I do ask, the "###" stop is your first pick (it is the one scheduled and mapped), and each alternative follows its fields as its own block:
 
@@ -254,7 +254,7 @@ Put the whole change list in a single fenced code block (triple backticks) so th
 <only the lines that change>
 
 ## Choose Option {s12}: <option name>
-(Makes that option the scheduled one.)
+(Makes that option the scheduled one and moves it to the front.)
 
 ## Remove Option {s12}: <option name>
 

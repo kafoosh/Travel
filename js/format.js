@@ -69,11 +69,24 @@ function setOptions(stop, opts, pick){
   else { delete stop.alts; delete stop.altPos; }
 }
 
-/* Make carousel slot `i` the chosen place. Returns whether anything changed. */
+/* Pin carousel slot `i`: it becomes the chosen place and moves to the front
+   of the carousel, the others keeping their order behind it. Returns whether
+   anything changed. */
 export function chooseOption(stop, i){
   const opts = optionsOf(stop);
-  if(i < 0 || i >= opts.length || i === chosenOptionIndex(stop)) return false;
-  setOptions(stop, opts, i);
+  if(i < 0 || i >= opts.length || (i === 0 && chosenOptionIndex(stop) === 0)) return false;
+  const [picked] = opts.splice(i, 1);
+  setOptions(stop, [picked, ...opts], 0);
+  return true;
+}
+
+/* Change some of slot `i`'s place fields (name, coordinates, notes…) —
+   the chosen place lives on the stop itself, the others in `alts`. */
+export function updateOption(stop, i, fields){
+  const pos = chosenOptionIndex(stop);
+  const target = i === pos ? stop : (stop.alts || [])[i < pos ? i : i - 1];
+  if(!target) return false;
+  OPTION_FIELDS.forEach(k => { if(k in fields) target[k] = k === 'tags' ? [...fields.tags] : fields[k]; });
   return true;
 }
 

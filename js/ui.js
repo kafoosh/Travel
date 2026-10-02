@@ -9,7 +9,7 @@
 import { esc, formatTime, formatDur, parseTime, dayDate, formatDayDate, slugify, debounce, parseLatLng } from './util.js';
 import { CATEGORIES, AB_CATS, DEFAULT_DUR, THEMES, DAY_COLORS, CAT_ICONS as ICONS, MODE_ICONS as MODE_ICON,
          newDay, serializeTrip, importText, blankTrip,
-         optionsOf, chosenOptionIndex, chooseOption, addOption, removeOption } from './format.js';
+         optionsOf, chosenOptionIndex, chooseOption, addOption, removeOption, updateOption } from './format.js';
 import { state, saveState, pushUndo, popUndo, replaceTrip, nextStopId, nextHotelId, nextChecklistId, forgetRoomCache, rememberPane } from './state.js';
 import { computeSchedule } from './schedule.js';
 import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
@@ -53,6 +53,7 @@ let mapFitPending = false;
 let mapRefitNext = false;
 let modalStopId = null;
 let modalRow = null;      // the schedule row the open popup came from, if any
+let modalOpt = 0;         // which of a meal's places the popup is showing
 let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
 let promptMode = null;    // sticky mode radio choice
 let promptReply = 'changes';   // edit mode: AI replies with 'changes' (a change list) or 'full' (the whole trip)
@@ -964,7 +965,7 @@ function renderScheduleList(day, sched){
       ${multi ? '' : illustrationHtml}
       <div class="stop-main">
         ${multi ? `
-        <div class="opt-viewport" role="group" aria-label="${opts.length} options for this meal — swipe to choose">
+        <div class="opt-viewport" role="group" aria-label="${opts.length} options for this meal — swipe to browse, pin to choose">
           ${opts.map((o, i) => `
           <div class="opt-slide${i === chosenIdx ? ' chosen' : ''}" data-opt="${i}" aria-label="Option ${i + 1} of ${opts.length}: ${esc(o.name)}">
             ${illustrationHtml}
@@ -976,6 +977,7 @@ function renderScheduleList(day, sched){
           <span class="opt-dots" aria-hidden="true">${opts.map((_, i) => `<span class="opt-dot${i === chosenIdx ? ' on' : ''}"></span>`).join('')}</span>
           <span class="opt-count" aria-live="polite">Option ${chosenIdx + 1} of ${opts.length}</span>
           <button type="button" class="opt-arrow" data-dir="1" aria-label="Next option">›</button>
+          <button type="button" class="opt-pin" aria-pressed="true">📌</button>
         </div>` : faceHtml(s, true)}
         <div class="manage-row">
           <select class="move-to-day" title="Move to another day" aria-label="Move ${esc(s.name)}">
@@ -997,7 +999,7 @@ function renderScheduleList(day, sched){
         if(opts[i].img) mountImage(sl.querySelector('.stop-illustration'), opts[i].img, ICONS[s.cat] || '📍', { alt: opts[i].name });
       });
     } else if(s.img) mountImage(card.querySelector('.stop-illustration'), s.img, ICONS[s.cat] || '📍', { alt: s.name });
-    const carousel = multi ? wireOptionCarousel(card, day, s.id, chosenIdx) : null;
+    const carousel = multi ? wireOptionCarousel(card, s.id, chosenIdx) : null;
 
     const sel = card.querySelector('.move-to-day');
     sel.addEventListener('click', e => e.stopPropagation());
@@ -1022,7 +1024,7 @@ function renderScheduleList(day, sched){
       if(e.target.closest('.drag-handle')) return;
       // A tap on the next option peeking in at the edge brings it over.
       if(carousel && carousel.tapped(e)) return;
-      openModal(s.id, row);
+      openModal(s.id, row, carousel ? carousel.shown() : null);
     });
     card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
@@ -1112,19 +1114,25 @@ function renderScheduleList(day, sched){
    MEAL OPTIONS CAROUSEL
    A food stop with options shows its places side by side in a
    horizontal scroll-snap strip, the next one peeking in at the
-   edge. Swiping (or the ‹ › arrows, or a tap on the peeking
-   place) settles on a place, and the place it settles on
-   becomes the chosen one: the schedule, the map and the travel
-   legs all follow. The order never changes as you swipe.
+   edge. Swiping (or ‹ ›, or a tap on the peeking place) only
+   browses; the 📌 in the strip's nav pins the place in view as
+   the chosen one — it moves to the front of the carousel, and
+   the schedule, the map and the travel legs follow it.
    ========================================================= */
 let deferredScheduleRefresh = false;
+// Which place each carousel is showing, by stop id — so a re-render (a
+// routed time landing, a tick elsewhere on the day) doesn't snap a card
+// someone is browsing back to its chosen place.
+const optBrowse = new Map();
 
-function wireOptionCarousel(card, day, stopId, chosenIdx){
+function wireOptionCarousel(card, stopId, chosenIdx){
   const vp = card.querySelector('.opt-viewport');
   const slides = [...vp.querySelectorAll('.opt-slide')];
   const dots = [...card.querySelectorAll('.opt-dot')];
   const count = card.querySelector('.opt-count');
-  let shown = chosenIdx;
+  const pin = card.querySelector('.opt-pin');
+  const remembered = optBrowse.get(stopId);
+  let shown = (remembered != null && remembered < slides.length) ? remembered : chosenIdx;
   let settleTimer = null;
 
   const nearest = () => {
@@ -1139,26 +1147,31 @@ function wireOptionCarousel(card, day, stopId, chosenIdx){
     dots.forEach((d, j) => d.classList.toggle('on', j === i));
     count.textContent = 'Option ' + (i + 1) + ' of ' + slides.length;
     slides.forEach((sl, j) => sl.classList.toggle('shown', j === i));
+    const on = i === chosenIdx;
+    pin.classList.toggle('on', on);
+    pin.setAttribute('aria-pressed', String(on));
+    pin.title = on ? 'Chosen for this meal' : 'Pin this place as the chosen one';
+    pin.setAttribute('aria-label', on ? 'Chosen for this meal' : 'Pin ' + slides[i].querySelector('.stop-name').textContent + ' as the chosen place');
   };
   const goTo = (i, smooth = true) => {
     i = Math.max(0, Math.min(slides.length - 1, i));
     vp.scrollTo({ left: slides[i].offsetLeft, behavior: smooth ? 'smooth' : 'auto' });
   };
+  // Re-renders wait while a finger is on the strip (see refreshDaySchedule)
+  // and catch up once the swipe has settled.
   const settle = () => {
     settleTimer = null;
-    if(vp.dataset.touch) return;           // finger still down — wait for it
+    if(vp.dataset.touch) return;
     vp.classList.remove('swiping');
-    const i = nearest();
-    if(i !== chosenIdx) chooseStopOption(stopId, i);
-    else if(deferredScheduleRefresh) refreshDaySchedule();
+    if(deferredScheduleRefresh) refreshDaySchedule();
   };
   const schedule = () => { clearTimeout(settleTimer); settleTimer = setTimeout(settle, 180); };
 
   vp.addEventListener('scroll', () => {
     const i = nearest();
-    if(i !== shown){ shown = i; paint(i); }
+    if(i !== shown){ shown = i; optBrowse.set(stopId, i); paint(i); }
     if(vp.dataset.aligning) return;
-    vp.classList.add('swiping');            // holds off re-renders until it settles
+    vp.classList.add('swiping');
     schedule();
   }, { passive: true });
   vp.addEventListener('touchstart', () => { vp.dataset.touch = '1'; vp.classList.add('swiping'); }, { passive: true });
@@ -1170,6 +1183,10 @@ function wireOptionCarousel(card, day, stopId, chosenIdx){
     e.stopPropagation();
     goTo(shown + Number(b.dataset.dir));
   }));
+  pin.addEventListener('click', (e) => {
+    e.stopPropagation();
+    pinStopOption(stopId, shown);
+  });
   card.querySelector('.opt-nav').addEventListener('click', e => e.stopPropagation());
   // Arrow keys on the focused card flick between places.
   card.addEventListener('keydown', (e) => {
@@ -1179,7 +1196,7 @@ function wireOptionCarousel(card, day, stopId, chosenIdx){
   });
 
   // The strip only has a width once it's laid out — on a phone showing the
-  // map pane it isn't yet — so the chosen place is scrolled into view
+  // map pane it isn't yet — so the place in view is scrolled into place
   // whenever the strip gets (or changes) a size.
   const align = () => {
     if(!vp.clientWidth) return;
@@ -1192,6 +1209,7 @@ function wireOptionCarousel(card, day, stopId, chosenIdx){
 
   return {
     align,
+    shown: () => shown,
     tapped(e){
       const sl = e.target.closest('.opt-slide');
       if(!sl || Number(sl.dataset.opt) === shown) return false;
@@ -1201,14 +1219,17 @@ function wireOptionCarousel(card, day, stopId, chosenIdx){
   };
 }
 
-function chooseStopOption(stopId, i){
+/* Pin a meal's place: chosen, and first in its carousel from now on. */
+function pinStopOption(stopId, i){
   const s = trip().stops[stopId];
-  if(!s) return;
+  if(!s) return false;
   pushUndo();
-  if(!chooseOption(s, i)){ state.undoStack.pop(); return; }
+  if(!chooseOption(s, i)){ state.undoStack.pop(); return false; }
+  optBrowse.set(stopId, 0);       // the pinned place is at the front now
   saveState();
   updateUndoButton();
   if(state.currentView === 'days') refreshDaySchedule();
+  return true;
 }
 
 function parseTimeStr(str){
@@ -1682,16 +1703,20 @@ const saveNotesDebounced = debounce(() => {
   if(!modalStopId) return;
   const s = trip().stops[modalStopId];
   if(!s) return;
-  s.notes = $('modal-notes').value;
+  updateOption(s, Math.min(modalOpt, optionsOf(s).length - 1), { notes: $('modal-notes').value });
   saveState();
 }, 500);
 
-function openModal(stopId, row){
+/* optIdx: for a meal with options, the place to open on (the one the card
+   was showing); the chosen place otherwise. */
+function openModal(stopId, row, optIdx = null){
   const stop = trip().stops[stopId];
   if(!stop) return;
   modalStopId = stopId;
+  const n = optionsOf(stop).length;
+  modalOpt = (optIdx != null && optIdx < n) ? optIdx : chosenOptionIndex(stop);
   // Kept for repainting after a flick to another option: the slot's start
-  // stays put, its end moves with the new place's duration.
+  // stays put, its end moves with the place's duration.
   modalRow = row ? { start: row.start, end: row.end, dur: stop.dur } : null;
   paintModal(stop, modalRow);
   $('modal-overlay').classList.add('open');
@@ -1701,17 +1726,22 @@ function openModal(stopId, row){
 }
 
 function paintModal(stop, row){
+  // The place on show: the stop itself, or one of its meal's other options.
+  // The slot-level actions (done, hide, bin) act on the stop either way.
+  const opts = optionsOf(stop);
+  if(modalOpt >= opts.length) modalOpt = chosenOptionIndex(stop);
+  const place = modalOpt === chosenOptionIndex(stop) ? stop : { ...opts[modalOpt], cat: stop.cat };
   const photo = $('modal-photo');
-  if(stop.img) mountImage(photo, stop.img, ICONS[stop.cat] || '📍', { alt: stop.name });
+  if(place.img) mountImage(photo, place.img, ICONS[stop.cat] || '📍', { alt: place.name });
   else { photo.textContent = ICONS[stop.cat] || '📍'; photo.classList.remove('has-img'); }
   $('modal-time-row').textContent = row
-    ? (formatTime(row.start) + ' – ' + formatTime(stop.dur === row.dur ? row.end : row.start + stop.dur) + ' · ' + formatDur(stop.dur))
-    : formatDur(stop.dur);
-  $('modal-title').textContent = stop.name;
-  $('modal-tags').innerHTML = stop.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('');
-  const full = stop.detail ? (stop.desc + '\n\n' + stop.detail) : stop.desc;
+    ? (formatTime(row.start) + ' – ' + formatTime(place === stop && stop.dur === row.dur ? row.end : row.start + place.dur) + ' · ' + formatDur(place.dur))
+    : formatDur(place.dur);
+  $('modal-title').textContent = place.name;
+  $('modal-tags').innerHTML = place.tags.map(t => `<span class="tag-chip">${esc(t)}</span>`).join('');
+  const full = place.detail ? (place.desc + '\n\n' + place.detail) : place.desc;
   $('modal-text').textContent = full;
-  $('modal-notes').value = stop.notes || '';
+  $('modal-notes').value = place.notes || '';
   $('modal-notes').readOnly = isViewOnly();
   paintModalDone(stop);
   paintModalHide(stop);
@@ -1726,36 +1756,48 @@ function paintModal(stop, row){
   bin.title = 'Move to bin';
   bin.setAttribute('aria-label', 'Move to bin');
   const gmaps = $('modal-gmaps');
-  gmaps.href = stopGmapsUrl(stop);
+  gmaps.href = stopGmapsUrl(place);
   gmaps.innerHTML = ICON_PIN + '<span>Open in Google Maps</span>';
-  gmaps.title = stop.lat != null ? 'Open this location in Google Maps' : 'Search Google Maps for ' + stop.name;
+  gmaps.title = place.lat != null ? 'Open this location in Google Maps' : 'Search Google Maps for ' + place.name;
   paintModalOptions(stop);
 }
 
-/* The popup's meal-options row: "Option 2 of 3" with arrows to flick to
-   another place (which becomes the chosen one, as a swipe on the card does),
-   plus adding a place or dropping this one. Only food stops get it. */
+/* The popup's meal-options row: "Option 2 of 3" with arrows to browse the
+   places (nothing changes until one is pinned), the 📌 that pins the place
+   on show as the chosen one, and adding a place or dropping this one. Only
+   food stops get it. */
 function paintModalOptions(stop){
   const host = $('modal-options');
   const opts = optionsOf(stop);
   if(stop.cat !== 'food' && opts.length < 2){ host.innerHTML = ''; return; }
-  const idx = chosenOptionIndex(stop);
+  const idx = modalOpt;
+  const chosen = idx === chosenOptionIndex(stop);
   const ro = isViewOnly();
   host.innerHTML = (opts.length > 1 ? `
     <div class="mo-switch">
       <button type="button" class="reset-btn mo-arrow" data-dir="-1" aria-label="Previous option"${idx === 0 ? ' disabled' : ''}>‹</button>
       <span class="mo-count">Option ${idx + 1} of ${opts.length}</span>
       <button type="button" class="reset-btn mo-arrow" data-dir="1" aria-label="Next option"${idx === opts.length - 1 ? ' disabled' : ''}>›</button>
-    </div>` : '') + (ro ? '' : `
-    <button type="button" class="reset-btn mo-add" title="Another place for this meal — swipe between them on the card">＋ Add option</button>
-    ${opts.length > 1 ? '<button type="button" class="reset-btn mo-remove" title="Drop this place; the next option takes its slot">Remove option</button>' : ''}`);
+    </div>
+    <button type="button" class="reset-btn mo-pin pin-day-btn${chosen ? ' active' : ''}" aria-pressed="${chosen}"
+      title="${chosen ? 'This is the place the day is planned around' : 'Make this the chosen place — it moves to the front'}"${ro ? ' disabled' : ''}>📌 ${chosen ? 'Chosen' : 'Pin as chosen'}</button>` : '') + (ro ? '' : `
+    <button type="button" class="reset-btn mo-add" title="Another place for this meal — browse them on the card">＋ Add option</button>
+    ${opts.length > 1 ? '<button type="button" class="reset-btn mo-remove" title="Drop this place from the meal">Remove option</button>' : ''}`);
   host.querySelectorAll('.mo-arrow').forEach(b => b.addEventListener('click', () => {
+    modalOpt = Math.max(0, Math.min(opts.length - 1, idx + Number(b.dataset.dir)));
+    optBrowse.set(modalStopId, modalOpt);    // the card follows when the popup closes
+    repaintModal();
+  }));
+  const pin = host.querySelector('.mo-pin');
+  if(pin) pin.addEventListener('click', () => {
     pushUndo();
-    if(!chooseOption(stop, idx + Number(b.dataset.dir))){ state.undoStack.pop(); return; }
+    if(!chooseOption(stop, idx)){ state.undoStack.pop(); return; }
+    modalOpt = 0;
+    optBrowse.set(modalStopId, 0);
     saveState();
     updateUndoButton();
     repaintModal();
-  }));
+  });
   const add = host.querySelector('.mo-add');
   if(add) add.addEventListener('click', () => {
     const id = modalStopId;
@@ -1766,6 +1808,8 @@ function paintModalOptions(stop){
   if(rm) rm.addEventListener('click', () => {
     pushUndo();
     removeOption(stop, idx);
+    modalOpt = chosenOptionIndex(stop);
+    optBrowse.delete(modalStopId);
     saveState();
     updateUndoButton();
     repaintModal();
@@ -1884,7 +1928,7 @@ function refreshEndPointFields(){
 }
 
 /* opts.optionOf: add another place to that food stop's options instead of
-   a new stop. */
+   a new stop — or, with opts.optionIdx, edit that one of its places. */
 export function openLocationForm(editStopId, defaultDayId, opts = {}){
   pendingOptionalGroup = null;   // a group head's ＋ sets this again right after
   const catSel = $('al-cat');
@@ -1893,19 +1937,35 @@ export function openLocationForm(editStopId, defaultDayId, opts = {}){
   const optionOf = (opts.optionOf && trip().stops[opts.optionOf]) ? opts.optionOf : '';
   $('al-editing').value = editStopId || '';
   $('al-option-of').value = optionOf;
+  const optionIdx = optionOf && Number.isInteger(opts.optionIdx) && optionsOf(trip().stops[optionOf])[opts.optionIdx]
+    ? opts.optionIdx : null;
+  $('al-option-idx').value = optionIdx ?? '';
+  const editing = !!editStopId || optionIdx != null;
   document.querySelectorAll('#add-location-form .al-slot-field').forEach(el => el.classList.toggle('hidden', !!optionOf));
-  $('al-heading').textContent = optionOf ? 'Add a meal option'
+  $('al-heading').textContent = optionOf ? (optionIdx != null ? 'Edit meal option' : 'Add a meal option')
     : editStopId ? 'Edit location' : 'Add a location';
   // One word in the top bar; the heading beside it says what's being saved.
   const submit = $('al-submit');
-  submit.textContent = editStopId ? 'Save' : 'Add';
-  submit.title = editStopId ? 'Save changes' : optionOf ? 'Add option' : 'Add location';
+  submit.textContent = editing ? 'Save' : 'Add';
+  submit.title = editing ? 'Save changes' : optionOf ? 'Add option' : 'Add location';
 
   if(optionOf){
     const parent = trip().stops[optionOf];
     catSel.value = parent.cat;
     $('al-dur').value = parent.dur;
     fillDaySelect($('al-day'), whereIsStop(optionOf));
+    if(optionIdx != null){
+      const o = optionsOf(parent)[optionIdx];
+      $('al-name').value = o.name;
+      $('al-dur').value = o.dur ?? parent.dur;
+      $('al-lat').value = o.lat ?? '';
+      $('al-lng').value = o.lng ?? '';
+      $('al-desc').value = o.desc;
+      $('al-detail').value = o.detail;
+      $('al-notes').value = o.notes;
+      $('al-img').value = o.img;
+      $('al-tags').value = o.tags.join(', ');
+    }
   } else if(editStopId){
     const s = trip().stops[editStopId];
     $('al-name').value = s.name;
@@ -1958,7 +2018,8 @@ function submitLocationForm(e){
   const optionOf = $('al-option-of').value;
   if(optionOf && trip().stops[optionOf]){
     pushUndo();
-    addOption(trip().stops[optionOf], {
+    const idxRaw = $('al-option-idx').value;
+    (idxRaw === '' ? addOption : (st, f) => updateOption(st, Number(idxRaw), f))(trip().stops[optionOf], {
       name,
       lat: (lat != null && lng != null) ? lat : null,
       lng: (lat != null && lng != null) ? lng : null,
@@ -4415,6 +4476,7 @@ export function wireStaticHandlers(){
   });
   on('undo-btn', 'click', () => {
     if(popUndo()){
+      optBrowse.clear();
       applyTheme();
       renderAll();
       if(state.currentView === 'info') renderInfo();
@@ -4428,9 +4490,12 @@ export function wireStaticHandlers(){
   on('modal-done', 'click', toggleModalDone);
   on('modal-hide', 'click', toggleModalHide);
   on('modal-edit', 'click', () => {
-    const id = modalStopId;
+    const id = modalStopId, opt = modalOpt;
     closeModal();
-    if(id) openLocationForm(id);
+    if(!id || !trip().stops[id]) return;
+    // A meal's other place edits as that place; the chosen one is the stop.
+    if(opt !== chosenOptionIndex(trip().stops[id])) openLocationForm(null, null, { optionOf: id, optionIdx: opt });
+    else openLocationForm(id);
   });
   on('modal-bin', 'click', () => {
     const id = modalStopId;
