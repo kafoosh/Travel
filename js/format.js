@@ -99,7 +99,7 @@ export function blankTrip(){
 
 const NL = '\n';
 function encVal(v){ return String(v).replace(/\r?\n/g, '\\n'); }
-function decVal(v){ return String(v).replace(/\\n/g, '\n'); }
+export function decVal(v){ return String(v).replace(/\\n/g, '\n'); }
 
 function stopLines(s){
   const out = [];
@@ -129,7 +129,11 @@ function stopLines(s){
   return out;
 }
 
-export function serializeTrip(trip){
+/* With `refs`, every hotel, stop and checklist line carries its id in braces
+   ("### Colosseum {s12}") so a change list (js/patch.js) can point at it.
+   The parser drops them again, so a file written this way imports as usual. */
+export function serializeTrip(trip, opts = {}){
+  const ref = id => (opts.refs && id) ? ' {' + id + '}' : '';
   const L = [];
   L.push('# Trip: ' + (trip.name || 'Untitled Trip'), '');
   if(trip.subtitle) L.push('- subtitle: ' + encVal(trip.subtitle));
@@ -141,7 +145,7 @@ export function serializeTrip(trip){
   if(trip.hotels.length){
     L.push('## Hotels', '');
     trip.hotels.forEach(h => {
-      L.push('### ' + h.name);
+      L.push('### ' + h.name + ref(h.id));
       if(h.lat != null && h.lng != null){
         L.push('- lat: ' + h.lat);
         L.push('- lng: ' + h.lng);
@@ -176,7 +180,7 @@ export function serializeTrip(trip){
     d.order.forEach(id => {
       const s = trip.stops[id];
       if(!s) return;
-      L.push('### ' + s.name);
+      L.push('### ' + s.name + ref(s.id));
       L.push(...stopLines(s));
       L.push('');
     });
@@ -195,7 +199,7 @@ export function serializeTrip(trip){
     trip.optional.forEach(o => {
       const s = trip.stops[o.id];
       if(!s) return;
-      L.push('### ' + s.name);
+      L.push('### ' + s.name + ref(s.id));
       L.push(...stopLines(s));
       if(o.day) L.push('- suggested day: ' + o.day);
       if(o.note) L.push('- suggestion note: ' + encVal(o.note));
@@ -210,7 +214,7 @@ export function serializeTrip(trip){
     trip.bin.forEach(id => {
       const s = trip.stops[id];
       if(!s) return;
-      L.push('### ' + s.name);
+      L.push('### ' + s.name + ref(s.id));
       L.push(...stopLines(s));
       L.push('');
     });
@@ -221,8 +225,8 @@ export function serializeTrip(trip){
     // Section headings ride out as "###" — real markdown structure, and the
     // parser below reads them back as headings rather than as items.
     trip.checklist.forEach(c => {
-      if(c.type === 'header') L.push('', '### ' + encVal(c.text), '');
-      else L.push('- [' + (c.done ? 'x' : ' ') + '] ' + encVal(c.text));
+      if(c.type === 'header') L.push('', '### ' + encVal(c.text) + ref(c.id), '');
+      else L.push('- [' + (c.done ? 'x' : ' ') + '] ' + encVal(c.text) + ref(c.id));
     });
     L.push('');
   }
@@ -278,7 +282,7 @@ const KEY_ALIASES = {
   color:'color', colour:'color', 'day color':'color', 'day colour':'color',
 };
 
-const INFO_KEYS = {
+export const INFO_KEYS = {
   weather:'weather',
   closures:'closures', 'weekly closures':'closures', 'location closures':'closures',
   reservations:'reservations', 'reservation musts':'reservations', bookings:'reservations',
@@ -286,7 +290,14 @@ const INFO_KEYS = {
   notes:'notes', general:'notes', misc:'notes', other:'notes',
 };
 
-function kvLine(line){
+/* A trailing "{id}" reference, as serializeTrip({refs:true}) writes it. */
+const REF_TAIL = /\s*\{([A-Za-z][\w-]*)\}\s*$/;
+export function splitRef(text){
+  const m = REF_TAIL.exec(text);
+  return m ? { name: text.slice(0, m.index).trim(), ref: m[1] } : { name: String(text).trim(), ref: null };
+}
+
+export function kvLine(line){
   const m = /^\s*[-*]?\s*([A-Za-z][A-Za-z0-9 _-]{0,24})\s*:\s*(.*)$/.exec(line);
   if(!m) return null;
   const key = KEY_ALIASES[m[1].trim().toLowerCase()];
@@ -296,13 +307,13 @@ function kvLine(line){
 
 /* A yes/no field as a person or an LLM might write it. A bare "- done:" with
    nothing after it means yes — the line was written to say so. */
-function isYes(v){
+export function isYes(v){
   const s = String(v || '').trim().toLowerCase();
   if(!s) return true;
   return /^(y|yes|true|1|x|✓|✔|done|visited)$/.test(s);
 }
 
-function parseDuration(v){
+export function parseDuration(v){
   const hm = /^(\d+)\s*h(?:\s*(\d+)\s*m?)?/i.exec(v);
   if(hm) return Number(hm[1]) * 60 + Number(hm[2] || 0);
   const n = parseInt(v, 10);
@@ -354,6 +365,39 @@ function recoverStructure(text){
   return out.join('\n');
 }
 
+/* One "- key: value" line of a stop or hotel block, onto the half-built
+   record `cur` (unassigned-only fields go to `meta`, when there is one).
+   Values that don't parse are skipped, leaving the field unset. Shared with
+   the change-list importer (js/patch.js), so both read fields identically. */
+export function applyStopKv(cur, meta, key, value){
+  if(key === 'lat' || key === 'lng' || key === 'endLat' || key === 'endLng'){ const n = parseFloat(value); if(!isNaN(n)) cur[key] = n; }
+  else if(key === 'fixedStart'){ if(/^\d{1,2}:\d{2}$/.test(value)) cur.fixedStart = value; }
+  else if(key === 'arriveBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) cur.arriveBy = v; }
+  else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
+  else if(key === 'cat') cur.cat = normCat(value);
+  else if(key === 'done') cur.done = isYes(value);
+  else if(key === 'hidden') cur.hidden = isYes(value);
+  else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
+  else if(key === 'sday' && meta){ const n = parseInt(value, 10); if(!isNaN(n)) meta.day = n; }
+  else if(key === 'snote' && meta) meta.note = decVal(value);
+  else if(key === 'group'){ if(meta && value.trim()) meta.group = decVal(value.trim()); }
+  else if(['img','desc','detail','notes','mode'].includes(key)) cur[key] = decVal(value);
+}
+
+/* A finished stop record from the fields a block supplied. */
+export function buildStop(id, cur){
+  return { id, name:cur.name, cat:cur.cat || 'other',
+    dur: cur.dur ?? DEFAULT_DUR[cur.cat || 'other'] ?? 45,
+    lat: cur.lat ?? null, lng: cur.lng ?? null,
+    endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
+    fixedStart: cur.fixedStart || null,
+    arriveBy: cur.arriveBy || null,
+    done: !!cur.done,
+    hidden: !!cur.hidden,
+    img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
+    notes: cur.notes || '', tags: cur.tags || [] };
+}
+
 /* Parse the markdown trip format. Returns {trip, warnings}. Throws only when
    the text yields nothing usable at all. */
 export function parseTrip(text){
@@ -387,17 +431,7 @@ export function parseTrip(text){
         mode:cur.mode === 'boat' ? 'boat' : 'walk', img:cur.img || '', desc:cur.desc || '' });
     } else {
       const id = 's' + (++stopSeq);
-      const stop = { id, name:cur.name, cat:cur.cat || 'other',
-        dur: cur.dur ?? DEFAULT_DUR[cur.cat || 'other'] ?? 45,
-        lat: cur.lat ?? null, lng: cur.lng ?? null,
-        endLat: cur.endLat ?? null, endLng: cur.endLng ?? null,
-        fixedStart: cur.fixedStart || null,
-        arriveBy: cur.arriveBy || null,
-        done: !!cur.done,
-        hidden: !!cur.hidden,
-        img: cur.img || '', desc: cur.desc || '', detail: cur.detail || '',
-        notes: cur.notes || '', tags: cur.tags || [] };
-      trip.stops[id] = stop;
+      trip.stops[id] = buildStop(id, cur);
       if(cur.__kind === 'day') cur.__day.order.push(id);
       // `group` holds the group's NAME until the whole document is read —
       // ids are assigned once every name has been seen (below).
@@ -443,12 +477,12 @@ export function parseTrip(text){
     if(section === 'checklist'){
       const headM = /^###\s+(.+)$/.exec(line);
       if(headM){
-        const htext = headM[1].trim();
+        const htext = splitRef(headM[1]).name;
         if(htext) trip.checklist.push({ id: 'k' + (trip.checklist.length + 1), text: decVal(htext), type:'header', done:false });
         continue;
       }
       const m = /^[-*]?\s*\[([ xX])\]\s*(.*)$/.exec(line);
-      const text = m ? m[2].trim() : line.replace(/^[-*]\s*/, '').trim();
+      const text = splitRef(m ? m[2] : line.replace(/^[-*]\s*/, '')).name;
       if(text) trip.checklist.push({ id: 'k' + (trip.checklist.length + 1), text: decVal(text), done: !!(m && m[1].toLowerCase() === 'x') });
       continue;
     }
@@ -462,10 +496,10 @@ export function parseTrip(text){
         if(k){ infoKey = k; }
         else { infoKey = 'notes'; infoBuf.push('**' + h3[1].trim() + '**'); }
       } else if(section === 'hotels'){
-        cur = { __kind:'hotel', name:h3[1].trim() };
+        cur = { __kind:'hotel', name:splitRef(h3[1]).name };
       } else if(section && section !== 'skip'){
         const kind = section === 'optional' ? 'optional' : section === 'bin' ? 'bin' : 'day';
-        cur = { __kind:kind, name:h3[1].trim() };
+        cur = { __kind:kind, name:splitRef(h3[1]).name };
         if(kind === 'day') cur.__day = section;
         if(kind === 'optional') curOptMeta = {};
       }
@@ -481,18 +515,7 @@ export function parseTrip(text){
     if(kv){
       const { key, value } = kv;
       if(cur){
-        if(key === 'lat' || key === 'lng' || key === 'endLat' || key === 'endLng'){ const n = parseFloat(value); if(!isNaN(n)) cur[key] = n; }
-        else if(key === 'fixedStart'){ if(/^\d{1,2}:\d{2}$/.test(value)) cur.fixedStart = value; }
-        else if(key === 'arriveBy'){ const v = value.toLowerCase(); if(['walk','cycle','transit','taxi','boat'].includes(v)) cur.arriveBy = v; }
-        else if(key === 'dur'){ const d = parseDuration(value); if(d != null) cur.dur = d; }
-        else if(key === 'cat') cur.cat = normCat(value);
-        else if(key === 'done') cur.done = isYes(value);
-        else if(key === 'hidden') cur.hidden = isYes(value);
-        else if(key === 'tags') cur.tags = value.split(/[,|]/).map(t => decVal(t.trim())).filter(Boolean);
-        else if(key === 'sday' && curOptMeta){ const n = parseInt(value, 10); if(!isNaN(n)) curOptMeta.day = n; }
-        else if(key === 'snote' && curOptMeta) curOptMeta.note = decVal(value);
-        else if(key === 'group'){ if(curOptMeta && value.trim()) curOptMeta.group = decVal(value.trim()); }
-        else if(['img','desc','detail','notes','mode'].includes(key)) cur[key] = decVal(value);
+        applyStopKv(cur, curOptMeta, key, value);
       } else if(section && typeof section === 'object'){
         // day-level metadata; hotel names are held raw and resolved after the
         // whole document is read (the Hotels section may come later)
