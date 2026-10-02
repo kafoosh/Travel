@@ -9,7 +9,7 @@ Grown out of a hand-built [Rome & Venice itinerary](https://github.com/kafoosh/T
 - **Start from nothing** — name the trip, pick the number of days (optionally a start date, which gives every day a real weekday), add hotels and locations. Everything is editable.
 - **Place by name, address or coordinates** — the location and hotel forms search as you type (a place name, or a street address in the *Address or coordinates* field), and just as happily take a pasted coordinate pair in whatever shape a map app copies it: `41.9101, 12.4983`, `(41.9101, 12.4983)`, `41.91° N, 12.49° E`, degrees-minutes-seconds, or a Google Maps link. A pair pasted into the Latitude or Longitude box is split across both.
 - **Import / export** — the whole trip (locations, coordinates, images, descriptions, notes, hotels, trip info) round-trips through one markdown file. A CSV of locations works too. Both live on the **AI Plan** tab, alongside the assistant prompt they feed.
-- **Plan with an AI** — the AI Plan tab has a copyable, editable prompt in two modes: *plan a new trip* (embeds the format spec) or *edit this trip* (embeds the full current plan so the AI knows exactly what exists and returns the complete updated trip to import back — user notes are explicitly protected). Both modes spell out the **Trip Info** section — weather, closures, reservations, events, notes — and the edit prompt names which of the five are still empty, so the assistant researches and fills them in rather than dropping them. Both also carry a **Photos** brief: ask for an image URL on every stop and hotel, Wikimedia Commons `Special:FilePath` form first (other public sources where Commons has nothing), look the file up rather than recall it, and leave the field out rather than guess — in edit mode the assistant fills in stops that have no photo yet while leaving the ones you chose alone. A **Tailor the plan** panel adds destination, travellers, pace, budget, transport preference, morning start, interests, food/dietary needs, accessibility, and things to avoid, all folded into the prompt. Example files in `.md`, `.txt`, and `.csv` ship in `demo/`.
+- **Plan with an AI** — the AI Plan tab has a copyable, editable prompt in two modes: *plan a new trip* (embeds the format spec) or *edit this trip* (embeds the full current plan so the AI knows exactly what exists — user notes are explicitly protected). When editing, a toggle picks what the AI replies with: **just the changes** (the default — a short *change list* that import applies to the trip in place, so a one-stop tweak costs a few lines of output rather than the whole trip, and nothing the AI wasn't asked to touch can drift) or **the full updated trip** (for a total rebuild; import replaces the trip). Both modes spell out the **Trip Info** section — weather, closures, reservations, events, notes — and the edit prompt names which of the five are still empty, so the assistant researches and fills them in rather than dropping them. Both also carry a **Photos** brief: ask for an image URL on every stop and hotel, Wikimedia Commons `Special:FilePath` form first (other public sources where Commons has nothing), look the file up rather than recall it, and leave the field out rather than guess — in edit mode the assistant fills in stops that have no photo yet while leaving the ones you chose alone. A **Tailor the plan** panel adds destination, travellers, pace, budget, transport preference, morning start, interests, food/dietary needs, accessibility, and things to avoid, all folded into the prompt. Example files in `.md`, `.txt`, and `.csv` ship in `demo/`.
 - **Import survives real-world LLM output** — the prompt asks for a fenced code block (so `#`/`-` markers survive copy-paste), and the parser unwraps fences and *reconstructs* stripped markers when a chat UI rendered the markdown before you copied it.
 - **Per-leg transport** — click any travel connector to pin that leg to walk / cycle / transit / taxi / boat; the leg re-routes against the matching profile and the schedule recalculates. Routed transit legs report the real vehicle (bus, metro, tram, ferry).
 - **Take it offline** — **Offline copy (.html)** on the AI Plan tab writes the whole trip into one self-contained HTML file: every day, time, travel leg, note and coordinate, the photos (fetched and packed in, shrunk to phone size), and a tile-free route sketch per day drawn from the routed geometry. It makes no network requests at all, so it opens from a phone's Files app on a plane or with roaming off — searchable, day by day, with coordinates that hand off to an offline map app (Organic Maps, OsmAnd…) via `geo:` links. Stops already ticked off in the planner arrive ticked, and more can be ticked as you go (those stay on that device), the trip's own `.md` file rides along inside it for importing back, and printing it gives a PDF of the whole trip.
@@ -115,6 +115,35 @@ Free text…
 
 A day names either one `hotel:` (it starts *and* ends there — the normal case) or a `start hotel:` / `end hotel:` pair when the two ends differ (arrival days start at `none`, departure days end at `none`, hotel-change days name one of each); files from before this distinction, with `hotel bookend:` lines, still import. A day may also carry `hide start: yes` / `hide end: yes` — that end of the day is off the map (no hotel pin, no leg to it), while the schedule still departs from and returns to it. A stop that moves (`hike`, `travel`, `flight`, `boat`) may carry `end lat` / `end lng`: its own coordinates are the departure point (trailhead, station, airport), the end coordinates the arrival — the commute is computed to the departure point, `duration` is the leg itself, and the day continues from the arrival end. The parser is tolerant (key aliases, `-`/`*`/bare `key: value`, `1h 45m` durations, etc.). CSV import expects a header row with at least `name`; recognised columns: `name, day, lat, lng, category, duration, description, detail, image, notes, tags, done, hidden` (`day` = number or `unassigned`).
 
+### Change lists
+
+The "Edit this trip — just the changes" prompt embeds the trip with an `{id}` after every hotel, stop and checklist item (`### Colosseum {s12}`) and asks the AI for only the operations, in a fenced block starting `# Trip Changes`:
+
+```markdown
+# Trip Changes
+
+## Add to Day 3 after {s14}        # or: before {ref} · at start · at end
+### Gelateria del Teatro
+- lat: 41.9012
+- lng: 12.4699
+- category: food
+- duration: 30
+
+## Edit {s12}                      # only the lines that change; "none" clears fixed start / arrive by / end lat-lng / tags
+- duration: 120
+## Move {s7} to Day 2 after {s3}   # or "to Unassigned"; several refs move together
+## Reorder Day 4: {s21} {s19} {s20}
+## Remove {s9} {h2} {k3}           # stops go to the Bin; hotels and checklist items too
+## Edit Day 4                      # title, start, hotel / start hotel / end hotel, color, return by
+## Add Day after Day 5: Tivoli     # its stops go inside, as ### blocks
+## Move Day 6 after Day 2
+## Remove Day 7
+## Add Hotel / Edit {h1} / Edit Trip / Add to Unassigned / Add to Checklist / Edit {k3}
+## Replace Info: Weather           # or "Add to Info: Closures" to append
+```
+
+Pasting or uploading one on the AI Plan tab applies it to the current trip instead of replacing it (`js/patch.js`): a confirm lists what changes, and one Undo takes it all back. Day numbers always mean the document the AI was given, however many days the list adds or removes before it gets there. A stop added by an earlier list has no id yet, so `{Exact Name}` works as a reference too. A reference that matches nothing is skipped with a warning, and the rest still applies. The `{id}`s are dropped when a whole trip is imported, so a full trip copied out of that prompt imports as usual.
+
 ## Enabling shared trips (one-time, free, ~5 minutes)
 
 Sharing uses Cloud Firestore's free tier. Until configured, the Share button explains what's missing; everything else works.
@@ -210,6 +239,7 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 | `js/admin.js` | The rooms dashboard behind `admin.html` |
 | `js/img.js` | Photo URL repair, retries, icon fallback |
 | `js/llm.js` | The AI-assistant prompt builder |
+| `js/patch.js` | Change lists (`# Trip Changes`): parse and apply an AI's edits to the current trip |
 | `js/config.js` | **Deployment config — paste your Firebase config here** |
 | `vendor/leaflet/` | Leaflet 1.9.4, vendored (no CDN dependency) |
 | `demo/rome-venice-trip.md` | Example trip, loadable from the AI Plan tab |
@@ -219,4 +249,4 @@ Requests go through a small sequential queue (~3/s max), are cached in `localSto
 - Plain ES modules, no build step — edit and refresh.
 - Everything user-entered is escaped (`esc()` in `js/util.js`) before touching `innerHTML`; imports are untrusted input.
 - The trip object is one JSON document (see `blankTrip()` in `js/format.js`); undo snapshots the whole thing.
-- `node scripts/roundtrip-test.mjs` runs the format round-trip checks.
+- `node scripts/roundtrip-test.mjs` runs the format round-trip checks; `node scripts/patch-test.mjs` the change-list checks.

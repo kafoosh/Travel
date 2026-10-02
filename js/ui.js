@@ -15,6 +15,7 @@ import { optimizeDayOrder, autoPlanOrders } from './optimize.js';
 import { routingStatus, onRoutingUpdate } from './routing.js';
 import { cloud, cloudStatusText, createRoom, duplicateRoom, deleteRoom, leaveRoom, shareUrl } from './cloud.js';
 import { buildPrompt, PROMPT_PREFS } from './llm.js';
+import { isPatchText, parsePatch, applyPatch } from './patch.js';
 import { attachAutocomplete } from './geocode.js';
 import { dayMapPoints, googleMapsUrl, tripKml } from './exporters.js';
 import { buildOfflineHtml, collectPhotos, photoUrls, offlineFileName } from './offline.js';
@@ -52,6 +53,7 @@ let mapRefitNext = false;
 let modalStopId = null;
 let promptEdits = null;   // user-edited prompt draft (survives view switches, cleared on mode change/reset)
 let promptMode = null;    // sticky mode radio choice
+let promptReply = 'changes';   // edit mode: AI replies with 'changes' (a change list) or 'full' (the whole trip)
 let promptPrefs = {};     // tailoring controls (destination, pace, interests…)
 let importNote = '';      // last import's error/warning line, shown on the AI Plan tab
 let pendingFlash = null;   // {id, until} — highlight survives async re-renders
@@ -3415,7 +3417,12 @@ export function renderAiPlan(){
       <p>Copy this prompt into any AI assistant (Claude, ChatGPT…). It asks the right questions, then produces a trip in exactly the format this site imports — locations with coordinates, descriptions, restaurant picks, closures, reservations.</p>
       <div class="prompt-mode" id="prompt-mode">
         <label><input type="radio" name="prompt-mode" value="new"> Plan a new trip from scratch</label>
-        <label><input type="radio" name="prompt-mode" value="edit"> Edit this trip — the prompt includes the current plan so the AI knows exactly what exists, and returns the full updated trip to import back</label>
+        <label><input type="radio" name="prompt-mode" value="edit"> Edit this trip — the prompt includes the current plan so the AI knows exactly what exists</label>
+      </div>
+      <div class="prompt-mode prompt-reply" id="prompt-reply">
+        <span class="pref-label">The AI replies with</span>
+        <label><input type="radio" name="prompt-reply" value="changes"> Just the changes — short and quick: import applies them to this trip, and everything else stays exactly as it is</label>
+        <label><input type="radio" name="prompt-reply" value="full"> The full updated trip — for a total rebuild; import replaces this trip with it</label>
       </div>
       <details class="prefs-box" id="prefs-box">
         <summary>Tailor the plan <span class="prefs-count" id="prefs-count"></span></summary>
@@ -3431,7 +3438,7 @@ export function renderAiPlan(){
     </div>
     <div class="infocard" style="grid-column:1/-1;">
       <h3>Import &amp; export</h3>
-      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. <b>Offline copy</b> builds a single HTML file of the finished itinerary — days, times, notes, photos and a route sketch each day — that opens on a phone with no signal at all. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing replaces the current trip</b> (Undo brings the old one back) — to change an existing trip with an AI, use the "Edit this trip" prompt above and import its full updated output. The KML export makes a shareable Google map: go to <a href="https://mymaps.google.com" target="_blank" rel="noopener">mymaps.google.com</a> → Create a new map → Import → pick the .kml — every day becomes a toggleable layer with pins and the route.</p>
+      <p>Export saves this whole trip (locations, notes, hotels, trip info) as one markdown file. <b>Offline copy</b> builds a single HTML file of the finished itinerary — days, times, notes, photos and a route sketch each day — that opens on a phone with no signal at all. Import accepts pasted text or an uploaded file — the markdown format (.md/.txt) carries everything, a CSV carries locations only. <b>Importing a whole trip replaces the current one</b> (Undo brings the old one back). A <b>change list</b> — what the "Edit this trip" prompt asks the AI for, starting <code># Trip Changes</code> — is applied to this trip instead: only what it names changes, and one Undo takes it all back. The KML export makes a shareable Google map: go to <a href="https://mymaps.google.com" target="_blank" rel="noopener">mymaps.google.com</a> → Create a new map → Import → pick the .kml — every day becomes a toggleable layer with pins and the route.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="export-btn">⬇ Export trip (.md)</button>
         <button class="reset-btn" id="export-offline-btn" title="One self-contained HTML file with the whole itinerary — opens on a phone with no signal at all">📴 Offline copy (.html)</button>
@@ -3441,7 +3448,7 @@ export function renderAiPlan(){
         <button class="reset-btn hidden" id="demo-btn">Load example trip (Rome &amp; Venice)</button>
       </div>
       <p style="margin:12px 0 4px;">…or paste a trip here:</p>
-      <textarea class="import-area" id="import-paste" placeholder="# Trip: My Trip&#10;&#10;## Day 1: …"></textarea>
+      <textarea class="import-area" id="import-paste" placeholder="# Trip: My Trip&#10;&#10;## Day 1: …&#10;&#10;— or a change list —&#10;&#10;# Trip Changes&#10;&#10;## Remove {s9}"></textarea>
       <p class="al-hint">Pasting from a chat works even if it swallowed the formatting — code fences are unwrapped and lost <code>#</code>/<code>-</code> markers are reconstructed automatically.</p>
       <div class="cloud-btn-row">
         <button class="reset-btn" id="import-paste-btn">Import pasted text</button>
@@ -3462,12 +3469,22 @@ export function renderAiPlan(){
     if(promptEdits != null && !force){ $('llm-prompt').value = promptEdits; return; }
     const mode = (el.querySelector('input[name="prompt-mode"]:checked') || {}).value || 'new';
     promptEdits = null;
-    $('llm-prompt').value = buildPrompt(trip(), mode, promptPrefs);
+    $('llm-prompt').value = buildPrompt(trip(), mode, promptPrefs, promptReply);
+  };
+  // The reply choice only means something when editing.
+  const showReply = () => {
+    const mode = (el.querySelector('input[name="prompt-mode"]:checked') || {}).value;
+    $('prompt-reply').classList.toggle('hidden', mode !== 'edit');
   };
   el.querySelectorAll('input[name="prompt-mode"]').forEach(r => {
     r.checked = promptMode ? r.value === promptMode : r.value === defaultMode;
-    r.addEventListener('change', () => { promptMode = r.value; refreshPrompt(true); });
+    r.addEventListener('change', () => { promptMode = r.value; showReply(); refreshPrompt(true); });
   });
+  el.querySelectorAll('input[name="prompt-reply"]').forEach(r => {
+    r.checked = r.value === promptReply;
+    r.addEventListener('change', () => { promptReply = r.value; refreshPrompt(true); });
+  });
+  showReply();
   renderPromptPrefs(() => refreshPrompt(true));
   $('llm-prompt').addEventListener('input', () => { promptEdits = $('llm-prompt').value; });
   refreshPrompt();
@@ -3693,6 +3710,7 @@ function setImportNote(text){
 
 function doImport(text){
   setImportNote('');
+  if(isPatchText(text)) return doApplyChanges(text);
   let result;
   try{
     result = importText(text);
@@ -3712,6 +3730,31 @@ function doImport(text){
   setImportNote(result.warnings.length
     ? '⚠ ' + result.warnings.slice(0, 6).join(' ') + (result.warnings.length > 6 ? ' (+' + (result.warnings.length - 6) + ' more)' : '')
     : '');
+}
+
+/* A "# Trip Changes" list: applied to the trip in place (see js/patch.js),
+   on a copy that's only swapped in once the person confirms the summary. */
+function doApplyChanges(text){
+  let result;
+  try{
+    result = applyPatch(trip(), parsePatch(text).ops);
+  } catch(e){
+    setImportNote('✕ ' + e.message);
+    return;
+  }
+  const skipped = result.warnings.length ? '\n\n' + result.warnings.length + ' change(s) could not be applied — details after import.' : '';
+  if(!confirm('Apply these changes to "' + trip().name + '"?\n\n• ' + result.summary.join('\n• ') + skipped + '\n\nUndo can take them all back.')) return;
+  const dayIdx = state.currentDayIndex;
+  pushUndo();
+  replaceTrip(result.trip);
+  state.currentDayIndex = Math.min(dayIdx, trip().days.length - 1);
+  applyTheme();
+  renderAll();
+  renderInfo();
+  setView('days');
+  setImportNote('✓ Applied: ' + result.summary.join(', ') + '.' + (result.warnings.length
+    ? ' ⚠ ' + result.warnings.slice(0, 6).join(' ') + (result.warnings.length > 6 ? ' (+' + (result.warnings.length - 6) + ' more)' : '')
+    : ''));
 }
 
 async function loadDemo(){

@@ -5,9 +5,11 @@
    understands. Two modes:
    - 'new':  plan a trip from scratch (embeds the format spec)
    - 'edit': modify the CURRENT trip — embeds the full current
-     trip document so the LLM knows exactly what exists, and
-     instructs it to output the complete updated document
-     (which the user then imports, replacing the old plan).
+     trip document so the LLM knows exactly what exists. The
+     reply is either a change list (the default: only what
+     changes, aimed at {id} references in the document — see
+     js/patch.js), or the complete updated document, which the
+     user imports to replace the old plan.
    ========================================================= */
 
 import { serializeTrip } from './format.js';
@@ -126,9 +128,126 @@ function infoStatus(info){
   return L.join('\n');
 }
 
-export function buildPrompt(trip, mode = 'new', prefs = null){
-  if(mode === 'edit') return buildEditPrompt(trip, prefs);
+/* reply: 'changes' (a "# Trip Changes" list) or 'full' (the whole trip). */
+export function buildPrompt(trip, mode = 'new', prefs = null, reply = 'changes'){
+  if(mode === 'edit') return reply === 'full' ? buildEditPrompt(trip, prefs) : buildChangesPrompt(trip, prefs);
   return buildNewPrompt(trip, prefs);
+}
+
+/* The edit prompt that asks for only the changes. Output is what costs: a
+   one-stop edit to a ten-day trip comes back as a few lines rather than the
+   whole document — and nothing the AI didn't mean to touch can drift. */
+function buildChangesPrompt(trip, prefs){
+  return `You are a travel-planning assistant. I have an existing trip in a structured markdown format — the complete current plan is at the bottom of this message. I want you to EDIT it.
+
+First, ask me what changes I want (unless I've already told you). Changes might be: adding or removing locations, moving stops between days, adding/removing days, inserting a new city, updating hotels, changing pacing, or refreshing the Trip Info sections.${prefLines(prefs, trip, 'edit')}
+
+HOW TO REPLY: ONLY THE CHANGES
+==============================
+Do NOT send the whole trip back. Reply with a CHANGE LIST: only what changes, which my trip planner applies to the plan it already has. Anything you don't mention stays exactly as it is.
+
+Every hotel, stop and checklist item in the document below carries a reference in curly braces after its name — "### Colosseum {s12}", "### Hotel Artemide {h1}", "- [ ] Book Vatican tickets {k3}". Use these references to point at things (the braces are part of it). Refer to days by number — "Day 3" — always using the numbering in the document below, even when your change list adds, removes or moves days before that point.
+
+Put the whole change list in a single fenced code block (triple backticks) so the "#" and "- " markers survive copy-paste. It starts with the line "# Trip Changes", followed by "## " operations, applied top to bottom. One short sentence before the block saying what you changed is fine; write nothing after it. The operations:
+
+## Add to Day 3 after {s14}
+### <new location name>
+- lat: <decimal latitude — REQUIRED>
+- lng: <decimal longitude — REQUIRED>
+- category: <landmark | museum | church | park | view | food | shop | hike | hotel | flight | travel | boat | other>
+- duration: <visit minutes>
+- image: <photo URL, see PHOTOS below>
+- description: <1–2 sentences>
+- detail: <2–4 sentences of history or story>
+(Every field a location has in the document below can be used: fixed start, arrive by, end lat / end lng, tags. Several "###" stops can follow one heading; they go in in that order. Instead of "after {ref}": "before {ref}", "at start", or "at end" — the default.)
+
+## Add to Unassigned
+### <location name>
+<the same fields, plus "- suggested day:", "- suggestion note:" and "- group:" if it fits an existing group>
+
+## Edit {s12}
+- duration: 120
+- fixed start: 09:30
+(Only the lines that change, written exactly as in the document. "- name: …" renames. "none" clears an optional field: fixed start, arrive by, end lat / end lng, tags.)
+
+## Move {s7} to Day 2 after {s3}
+(One or more references. Give a day ("to Day 2"), a position ("after {ref}", "before {ref}", "at start", "at end"), or both — "## Move {s7} after {s9}" moves it beside {s9} on whatever day that is. "## Move {s7} to Unassigned" takes it off its day.)
+
+## Reorder Day 4: {s21} {s19} {s20} {s22}
+(That day's stops in their new order — list every one of them.)
+
+## Remove {s9} {s10}
+(Stops go to the Bin, where I can bring them back. Works for hotels and checklist items too.)
+
+## Edit Day 4
+- title: <new day title>
+- start: 08:30
+- hotel: <hotel name or {h2}, or "none">
+(Also "- start hotel:" / "- end hotel:", "- color:", "- return by:" — the same day lines as in the document. Only the lines that change.)
+
+## Add Day after Day 5: <day title>
+- start: 09:00
+- hotel: <hotel name>
+### <stop>
+<fields>
+(Or "Add Day before Day 5", "Add Day at start", "Add Day at end". The new day's stops go INSIDE this operation, as "###" blocks — a later "Add to Day N" cannot reach a day that didn't exist in the document.)
+
+## Move Day 6 after Day 2
+(Or "before Day N", "to start", "to end".)
+
+## Remove Day 7
+(Any stops still on it go to the Bin — move the ones worth keeping first.)
+
+## Add Hotel
+### <hotel name>
+- lat: …
+- lng: …
+- transport: walk
+- image: …
+- description: …
+
+## Edit {h1}
+<only the hotel lines that change>
+
+## Edit Trip
+- name: …
+- subtitle: …
+- start date: <YYYY-MM-DD>
+
+## Add to Checklist
+- [ ] <item>
+
+## Edit {k3}
+- [x] <the item's text>
+
+## Replace Info: Weather
+<the complete new text of that Trip Info section>
+
+## Add to Info: Closures
+<text added to the end of that section>
+(Trip Info sections: Weather, Closures, Reservations, Events, Notes.)
+
+RULES
+=====
+- Only ever reference things by the {references} in the document (or by "Day N"). Never invent a reference — new stops and hotels have none; they get one when the planner applies the list.
+- Touch nothing I didn't ask about. My notes are mine: never edit a stop's "- notes:" line. A "- done: yes" stop is one I have already visited — don't move or remove it unless I ask. Never change or remove an image line that is already there.
+- Days must still chain: each says where it starts and ends ("- hotel:" for both ends, or a "- start hotel:" / "- end hotel:" pair — an arrival day starts at "none", a departure day ends at "none", a hotel-change day starts at the old hotel and ends at the new one). When you add, remove or move days, or change hotels, add "## Edit Day N" operations so every day still starts where the previous night was spent. A new day with no hotel line inherits the hotel of the day before it.
+- A moving stop — a hike, a train, a flight, a ferry (category hike | travel | flight | boat) — has its lat/lng at the DEPARTURE point and "- end lat:" / "- end lng:" where it ARRIVES; give both ends to any within-trip train/flight/ferry you add.
+- New locations need real lat/lng coordinates (they drive the map and travel times), realistic durations, and an "- image:" line wherever you can source a real photo (see PHOTOS below). Travel between stops is computed automatically — durations are visit time only.
+- Keep each "- key: value" on a single line.
+- Keep Trip Info in step with your changes: "## Add to Info: Closures" / "Reservations" for stops you add that close weekly or need booking.
+- If what I ask for reshapes most of the trip, say so and send the complete trip document instead, in the same format as below but without the {references} — my planner accepts either.
+- If I ask for more changes afterwards, send a NEW change list with only those changes, written as if your earlier list has been applied. A stop you added earlier has no reference yet: point at it with its exact name in braces, e.g. {Gelateria del Teatro}.
+
+TRIP INFO
+=========
+${infoStatus(trip.info)}
+
+${imageSpec()}
+
+CURRENT TRIP DOCUMENT
+=====================
+${serializeTrip(trip, { refs: true })}`;
 }
 
 function buildEditPrompt(trip, prefs){
